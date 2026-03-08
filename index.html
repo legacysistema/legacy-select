@@ -1631,7 +1631,7 @@ async function refreshClientsList() {
     const photos = await dbGetByIndex('photos', 'clientId', c.id);
     const sel = await dbGet('selections', c.id);
     const status = sel ? (sel.paymentStatus === 'paid' ? `<span class="badge badge-green">✓ Pago</span>` : sel.paymentStatus === 'confirmed' ? `<span class="badge badge-blue">Seleção Recebida</span>` : `<span class="badge badge-gold">Pendente</span>`) : `<span class="badge badge-gray">Aguardando</span>`;
-    const link = `${window.location.href.split('?')[0]}?cliente=${c.id}`;
+    const link = await buildClientLink(c.id);
     return `<tr>
       <td><div class="client-name">${escHtml(c.name)}</div><div class="client-event">${escHtml(c.event)}</div></td>
       <td>${c.includedCount}</td>
@@ -1759,7 +1759,7 @@ async function renderAdminGallery(clientId) {
   `).join('');
 
   // Update link
-  const link = `${window.location.href.split('?')[0]}?cliente=${clientId}`;
+  const link = await buildClientLink(clientId);
   document.getElementById('client-link-url').textContent = link;
   document.getElementById('client-link-section').classList.remove('hidden');
 }
@@ -1913,13 +1913,26 @@ async function clearGallery() {
   showToast('Galeria limpa', 'info');
 }
 
-function generateClientLink() {
+async function buildClientLink(clientId) {
+  const baseUrl = window.location.href.split('?')[0];
+  const urlSetting  = await dbGet('settings', 'supabase_url');
+  const anonSetting = await dbGet('settings', 'supabase_anon');
+  const keySetting  = await dbGet('settings', 'supabase_key');
+  const sbUrl = (urlSetting  && urlSetting.value)  || '';
+  const sbKey = (anonSetting && anonSetting.value) || (keySetting && keySetting.value) || '';
+  let link = `${baseUrl}?cliente=${clientId}`;
+  if (sbUrl) link += `&sbu=${encodeURIComponent(sbUrl)}`;
+  if (sbKey) link += `&sbk=${encodeURIComponent(sbKey)}`;
+  return link;
+}
+
+async function generateClientLink() {
   if (!currentGalleryClientId) return;
-  const link = `${window.location.href.split('?')[0]}?cliente=${currentGalleryClientId}`;
+  const link = await buildClientLink(currentGalleryClientId);
   document.getElementById('client-link-url').textContent = link;
   document.getElementById('client-link-section').classList.remove('hidden');
   copyText(link);
-  showToast('Link copiado!', 'success');
+  showToast('Link copiado! (com credenciais para acesso mobile)', 'success');
 }
 
 function copyClientLink() {
@@ -2034,6 +2047,21 @@ async function loadPixConfig() {
 // CLIENT AREA
 // ============================================================
 async function loadClientArea(clientId) {
+  // Ler credenciais do Supabase da URL (embutidas no link pelo admin)
+  const urlParams = new URLSearchParams(window.location.search);
+  const sbUrlParam = urlParams.get('sbu');
+  const sbKeyParam = urlParams.get('sbk');
+  if (sbUrlParam && sbKeyParam && !supabaseClient) {
+    try {
+      supabaseClient = window.supabase.createClient(
+        decodeURIComponent(sbUrlParam),
+        decodeURIComponent(sbKeyParam),
+        { auth: { persistSession: false, autoRefreshToken: false } }
+      );
+      console.log('Supabase conectado via URL params');
+    } catch(e) { console.warn('Falha ao conectar Supabase via URL:', e); }
+  }
+
   let client = await dbGet('clients', clientId);
 
   // Try Supabase if not in local DB
