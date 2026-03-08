@@ -979,8 +979,10 @@ body::before {
         </div>
         <div class="divider"></div>
         <p style="font-size:0.8rem;color:var(--text3);margin-bottom:10px;">Execute este SQL no Supabase para criar as tabelas:</p>
-        <div class="sql-block">-- Tabela de clientes
-CREATE TABLE IF NOT EXISTS clients (
+        <div class="sql-block">-- ⚠️ Tabelas com prefixo fs_ para não conflitar com tabelas existentes
+
+-- Clientes do FotoSelect
+CREATE TABLE IF NOT EXISTS fs_clients (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   name TEXT NOT NULL,
   event TEXT,
@@ -990,19 +992,21 @@ CREATE TABLE IF NOT EXISTS clients (
   price_per_extra DECIMAL(10,2) DEFAULT 25.00,
   created_at TIMESTAMP DEFAULT NOW()
 );
--- Tabela de fotos (metadados)
-CREATE TABLE IF NOT EXISTS photos (
+
+-- Fotos (metadados + URL do storage)
+CREATE TABLE IF NOT EXISTS fs_photos (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  client_id UUID REFERENCES clients(id),
+  client_id UUID REFERENCES fs_clients(id) ON DELETE CASCADE,
   filename TEXT,
   storage_url TEXT,
   photo_order INTEGER,
   created_at TIMESTAMP DEFAULT NOW()
 );
--- Tabela de seleções
-CREATE TABLE IF NOT EXISTS selections (
+
+-- Seleções dos clientes
+CREATE TABLE IF NOT EXISTS fs_selections (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  client_id UUID REFERENCES clients(id) UNIQUE,
+  client_id UUID REFERENCES fs_clients(id) ON DELETE CASCADE UNIQUE,
   selected_photo_ids TEXT[],
   extras_count INTEGER DEFAULT 0,
   total_value DECIMAL(10,2) DEFAULT 0,
@@ -1010,8 +1014,24 @@ CREATE TABLE IF NOT EXISTS selections (
   confirmed_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW()
 );
--- Storage bucket
-INSERT INTO storage.buckets (id, name, public) VALUES ('galeria', 'galeria', true) ON CONFLICT DO NOTHING;</div>
+
+-- Storage bucket para as fotos
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('galeria', 'galeria', true)
+ON CONFLICT DO NOTHING;
+
+-- RLS
+ALTER TABLE fs_clients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fs_photos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fs_selections ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "fs_clients_all" ON fs_clients FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "fs_photos_all" ON fs_photos FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "fs_selections_all" ON fs_selections FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "fs_storage_insert" ON storage.objects FOR INSERT TO anon WITH CHECK (bucket_id = 'galeria');
+CREATE POLICY "fs_storage_select" ON storage.objects FOR SELECT TO anon USING (bucket_id = 'galeria');
+CREATE POLICY "fs_storage_delete" ON storage.objects FOR DELETE TO anon USING (bucket_id = 'galeria');</div>
       </div>
       <div class="glass-card" style="margin-top:20px;">
         <div class="config-section-title">Dados PIX para Cobrança</div>
@@ -1428,7 +1448,7 @@ async function saveSupabaseConfig() {
 async function testSupabaseConnection() {
   if (!supabaseClient) { showToast('Configure o Supabase primeiro', 'warning'); return; }
   try {
-    const { error } = await supabaseClient.from('clients').select('id').limit(1);
+    const { error } = await supabaseClient.from('fs_clients').select('id').limit(1);
     if (error) throw error;
     showToast('Conexão com Supabase OK!', 'success');
   } catch(e) {
@@ -1508,7 +1528,7 @@ async function saveClient() {
   // Sync to Supabase if connected
   if (supabaseClient) {
     try {
-      await supabaseClient.from('clients').upsert({
+      await supabaseClient.from('fs_clients').upsert({
         id: client.id, name: client.name, event: client.event,
         email: client.email, event_date: client.eventDate,
         included_count: client.includedCount, price_per_extra: client.pricePerExtra
@@ -1765,7 +1785,7 @@ function processAndSavePhoto(file, itemId) {
           if (!error) {
             const { data } = supabaseClient.storage.from('galeria').getPublicUrl(path);
             // Store URL reference
-            await supabaseClient.from('photos').upsert({
+            await supabaseClient.from('fs_photos').upsert({
               id: photo.id, client_id: photo.clientId,
               filename: photo.filename, storage_url: data.publicUrl, photo_order: photo.order
             });
@@ -1806,7 +1826,7 @@ async function deletePhoto(photoId, e) {
     try {
       const path = `${currentGalleryClientId}/${photoId}`;
       await supabaseClient.storage.from('galeria').remove([path]);
-      await supabaseClient.from('photos').delete().eq('id', photoId);
+      await supabaseClient.from('fs_photos').delete().eq('id', photoId);
     } catch(e) { console.warn('Supabase delete failed:', e); }
   }
   await renderAdminGallery(currentGalleryClientId);
@@ -1888,7 +1908,7 @@ async function deleteSelection() {
   if (!confirm('Excluir esta seleção?')) return;
   await dbDelete('selections', selectionDetailClientId);
   if (supabaseClient) {
-    try { await supabaseClient.from('selections').delete().eq('client_id', selectionDetailClientId); } catch(e) {}
+    try { await supabaseClient.from('fs_selections').delete().eq('client_id', selectionDetailClientId); } catch(e) {}
   }
   closeModal('modal-selection-detail');
   await loadDashboard();
@@ -1948,7 +1968,7 @@ async function loadClientArea(clientId) {
   // Try Supabase if not in local DB
   if (!client && supabaseClient) {
     try {
-      const { data } = await supabaseClient.from('clients').select('*').eq('id', clientId).single();
+      const { data } = await supabaseClient.from('fs_clients').select('*').eq('id', clientId).single();
       if (data) {
         client = {
           id: data.id, name: data.name, event: data.event,
@@ -1973,7 +1993,7 @@ async function loadClientArea(clientId) {
   // Try Supabase if no local photos
   if (!photos.length && supabaseClient) {
     try {
-      const { data } = await supabaseClient.from('photos').select('*').eq('client_id', clientId).order('photo_order');
+      const { data } = await supabaseClient.from('fs_photos').select('*').eq('client_id', clientId).order('photo_order');
       if (data && data.length) {
         photos = data.map(p => ({
           id: p.id, clientId: p.client_id, filename: p.filename,
@@ -2234,7 +2254,7 @@ async function confirmSelection() {
   // Sync to Supabase
   if (supabaseClient) {
     try {
-      await supabaseClient.from('selections').upsert({
+      await supabaseClient.from('fs_selections').upsert({
         client_id: sel.clientId,
         selected_photo_ids: sel.selectedPhotoIds,
         extras_count: sel.extrasCount,
