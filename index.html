@@ -981,9 +981,13 @@ body::before {
             <span style="font-size:0.72rem;color:var(--text3);margin-top:4px;">Dashboard → Settings → API → anon public</span>
           </div>
         </div>
-        <div style="margin-top:16px;">
+        <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-primary" onclick="saveSupabaseConfig()">Salvar e Conectar</button>
-          <button class="btn btn-ghost" style="margin-left:8px;" onclick="testSupabaseConnection()">Testar Conexão</button>
+          <button class="btn btn-ghost" onclick="testSupabaseConnection()">Testar Conexão</button>
+          <button class="btn btn-danger btn-sm" onclick="clearSupabaseCredentials()">🗑 Limpar Credenciais Salvas</button>
+        </div>
+        <div style="margin-top:12px;background:rgba(248,113,113,0.07);border:1px solid rgba(248,113,113,0.2);border-radius:var(--r);padding:12px 14px;font-size:0.8rem;color:var(--text2);">
+          <strong style="color:var(--red);">⚠️ Se ainda der erro:</strong> Clique em <strong>"Limpar Credenciais Salvas"</strong> primeiro, depois cole a <strong>service_role secret</strong> (não a anon key) e clique Salvar e Conectar novamente.
         </div>
         <div class="divider"></div>
         <p style="font-size:0.8rem;color:var(--text3);margin-bottom:10px;">Execute este SQL no Supabase para criar as tabelas:</p>
@@ -1404,16 +1408,19 @@ async function initSupabase() {
     const keySetting  = await dbGet('settings', 'supabase_key');
     const anonSetting = await dbGet('settings', 'supabase_anon');
     const url  = (urlSetting  && urlSetting.value)  || SUPABASE_URL_DEFAULT;
-    const key  = keySetting  && keySetting.value;   // service_role
-    const anon = anonSetting && anonSetting.value;  // anon
-    document.getElementById('config-supabase-url').value = url;
-    if (key) document.getElementById('config-supabase-key').value = key;
-    if (anon) {
-      const anonEl = document.getElementById('config-supabase-anon');
-      if (anonEl) anonEl.value = anon;
-    }
+    const key  = keySetting  && keySetting.value;
+    const anon = anonSetting && anonSetting.value;
+
+    // Preencher campos de UI — so existem no admin, nao na area do cliente
+    const urlEl  = document.getElementById('config-supabase-url');
+    const keyEl  = document.getElementById('config-supabase-key');
+    const anonEl = document.getElementById('config-supabase-anon');
+    if (urlEl)          urlEl.value  = url;
+    if (keyEl  && key)  keyEl.value  = key;
+    if (anonEl && anon) anonEl.value = anon;
+
     if (key) {
-      connectSupabase(url, key, anon);
+      connectSupabase(url, key, anon || key);
     } else {
       updateSupabaseStatus(false);
     }
@@ -1425,11 +1432,16 @@ async function initSupabase() {
 function connectSupabase(url, serviceKey, anonKey) {
   try {
     if (!serviceKey || serviceKey.length < 10) { updateSupabaseStatus(false); return null; }
-    // Admin client uses service_role — bypasses RLS completely
     supabaseClient = window.supabase.createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false }
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false
+      },
+      global: {
+        headers: { Authorization: 'Bearer ' + serviceKey }
+      }
     });
-    // Anon client for client-facing reads (optional)
     window._supabaseAnon = anonKey
       ? window.supabase.createClient(url, anonKey, { auth: { persistSession: false } })
       : supabaseClient;
@@ -1459,25 +1471,54 @@ async function saveSupabaseConfig() {
   const anonEl = document.getElementById('config-supabase-anon');
   const anon = anonEl ? anonEl.value.trim() : '';
   if (!url) { showToast('Informe a URL do Supabase', 'warning'); return; }
-  if (!key)  { showToast('Informe a service_role key', 'warning'); return; }
+  if (!key) { showToast('Informe a service_role key', 'warning'); return; }
+  if (key.length < 100) { showToast('Essa parece ser a anon key — cole a service_role secret (mais longa)', 'warning'); return; }
   await dbSet('settings', { key: 'supabase_url',  value: url });
   await dbSet('settings', { key: 'supabase_key',  value: key });
   await dbSet('settings', { key: 'supabase_anon', value: anon });
   const client = connectSupabase(url, key, anon);
   if (client) {
-    showToast('Supabase configurado com service_role!', 'success');
+    // Test immediately after saving
+    await testSupabaseConnection(true);
   } else {
-    showToast('Erro: Verifique a URL e a chave', 'error');
+    showToast('Erro ao conectar — verifique a URL', 'error');
   }
 }
 
-async function testSupabaseConnection() {
+async function clearSupabaseCredentials() {
+  await dbDelete('settings', 'supabase_key');
+  await dbDelete('settings', 'supabase_anon');
+  supabaseClient = null;
+  document.getElementById('config-supabase-key').value = '';
+  const anonEl = document.getElementById('config-supabase-anon');
+  if (anonEl) anonEl.value = '';
+  updateSupabaseStatus(false);
+  showToast('Credenciais removidas — cole as novas chaves', 'info');
+}
+
+async function testSupabaseConnection(silent) {
   if (!supabaseClient) { showToast('Configure o Supabase primeiro', 'warning'); return; }
   try {
-    const { data, error } = await supabaseClient.from('fs_clients').select('id').limit(1);
-    if (error) throw error;
-    showToast('✅ Conexão OK! Tabela fs_clients acessível.', 'success');
+    // Use raw fetch to avoid any client-side caching issues
+    const url = document.getElementById('config-supabase-url').value.trim();
+    const key = document.getElementById('config-supabase-key').value.trim();
+    const res = await fetch(url + '/rest/v1/fs_clients?select=id&limit=1', {
+      headers: {
+        'apikey': key,
+        'Authorization': 'Bearer ' + key,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (res.status === 401 || res.status === 403) {
+      const body = await res.text();
+      throw new Error('Acesso negado (' + res.status + '): ' + body);
+    }
+    if (res.status === 404) throw new Error('Tabela fs_clients não encontrada — execute o SQL de criação');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!silent) showToast('✅ Conexão OK! Tabela fs_clients acessível.', 'success');
+    updateSupabaseStatus(true);
   } catch(e) {
+    updateSupabaseStatus(false);
     showToast('Erro: ' + (e.message || 'Falha na conexão'), 'error');
     console.error('Supabase test error:', e);
   }
@@ -1491,6 +1532,9 @@ async function init() {
     await initDB();
     const params = new URLSearchParams(window.location.search);
     const clienteId = params.get('cliente');
+
+    // SEMPRE inicializa Supabase — necessário tanto no admin quanto no cliente
+    await initSupabase();
 
     // Load PIX config
     await loadPixConfig();
@@ -1518,7 +1562,7 @@ async function init() {
 // ============================================================
 async function initAdmin() {
   document.getElementById('admin-panel').classList.remove('hidden');
-  await initSupabase();
+  // initSupabase() já foi chamado no init() — não duplicar
   await loadDashboard();
   await refreshClientsList();
   await refreshGalleryClientList();
