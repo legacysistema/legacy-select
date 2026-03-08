@@ -1184,37 +1184,60 @@ CREATE POLICY "fs_storage_delete" ON storage.objects FOR DELETE TO anon USING (b
 
 <!-- PIX PAYMENT MODAL -->
 <div class="modal-overlay hidden" id="modal-pix">
-  <div class="modal-box">
+  <div class="modal-box" style="max-width:460px;">
     <div class="modal-header">
-      <h3>💳 Pagamento PIX</h3>
+      <h3>🟢 Pagar via PIX</h3>
       <button class="modal-close" onclick="closeModal('modal-pix')">✕</button>
     </div>
-    <div class="pix-amount">
-      <div class="amount-label">Total a Pagar</div>
-      <div class="amount-value" id="pix-amount-display">R$ 0,00</div>
-      <div style="color:var(--text2);font-size:0.82rem;margin-top:4px;" id="pix-extras-detail"></div>
+
+    <!-- Valor -->
+    <div style="text-align:center;margin-bottom:24px;">
+      <div style="font-size:0.72rem;color:var(--text3);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px;">Valor a Pagar</div>
+      <div style="font-family:var(--font-display);font-size:3rem;font-weight:300;color:var(--gold);line-height:1;" id="pix-amount-display">R$ 0,00</div>
+      <div style="color:var(--text2);font-size:0.82rem;margin-top:6px;" id="pix-extras-detail"></div>
     </div>
-    <div id="qrcode-container">
-      <div id="qrcode-render"></div>
+
+    <!-- Chave PIX -->
+    <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);padding:16px 18px;margin-bottom:14px;">
+      <div style="font-size:0.7rem;color:var(--text3);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;">Chave PIX</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="flex:1;font-family:var(--font-mono);font-size:0.95rem;color:var(--text);word-break:break-all;" id="pix-key-display">—</div>
+        <button class="btn btn-sm btn-primary" onclick="copyPixKey()" style="flex-shrink:0;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Copiar
+        </button>
+      </div>
     </div>
-    <p style="text-align:center;font-size:0.8rem;color:var(--text3);margin-bottom:12px;">Escaneie o QR Code com o app do seu banco</p>
-    <div style="margin-bottom:12px;">
-      <div style="font-size:0.75rem;color:var(--text3);margin-bottom:6px;letter-spacing:0.1em;text-transform:uppercase;">PIX Copia e Cola</div>
-      <div class="pix-copy-paste" id="pix-string-display" onclick="copyPixString()">—</div>
-      <button class="btn btn-ghost btn-sm btn-block" onclick="copyPixString()">📋 Copiar Código PIX</button>
+
+    <!-- Tipo da chave -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;font-size:0.82rem;color:var(--text2);">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:15px;height:15px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Tipo: <span id="pix-type-display" style="color:var(--text);font-weight:500;">—</span>
+      &nbsp;·&nbsp; Favorecido: <span id="pix-name-display" style="color:var(--text);font-weight:500;">—</span>
     </div>
+
     <div class="divider"></div>
-    <div style="background:rgba(240,169,75,0.08);border:1px solid rgba(240,169,75,0.2);border-radius:var(--r);padding:14px;margin-bottom:16px;">
-      <p style="font-size:0.82rem;color:var(--gold);">⚠️ Após realizar o pagamento, clique no botão abaixo para confirmar e liberar o envio da seleção.</p>
+
+    <!-- Instruções -->
+    <div style="margin:16px 0;">
+      <div style="font-size:0.78rem;color:var(--text2);line-height:1.7;">
+        <div style="margin-bottom:6px;">1. Abra o app do seu banco</div>
+        <div style="margin-bottom:6px;">2. Vá em <strong style="color:var(--text);">PIX → Transferir → Chave PIX</strong></div>
+        <div style="margin-bottom:6px;">3. Cole a chave copiada acima</div>
+        <div>4. Confirme o valor de <strong style="color:var(--gold);" id="pix-amount-inline">—</strong> e envie</div>
+      </div>
     </div>
-    <div style="display:flex;gap:10px;flex-direction:column;">
-      <button class="btn btn-secondary btn-block" id="btn-simulate-payment" onclick="simulatePayment()">
-        🧪 Simular Pagamento Recebido
-      </button>
-      <button class="btn btn-gold btn-block hidden" id="btn-payment-confirmed" onclick="onPaymentConfirmed()">
-        ✅ Pagamento Confirmado — Enviar Seleção
-      </button>
+
+    <div class="divider"></div>
+
+    <!-- Aviso -->
+    <div style="background:rgba(240,169,75,0.07);border:1px solid rgba(240,169,75,0.2);border-radius:var(--r);padding:12px 14px;margin:16px 0;font-size:0.82rem;color:var(--gold);">
+      ⚠️ Após enviar o PIX, clique em <strong>"Já Paguei"</strong> abaixo para liberar a confirmação da seleção.
     </div>
+
+    <button class="btn btn-gold btn-block btn-lg" onclick="onPaymentConfirmed()">
+      ✅ Já Paguei — Liberar Seleção
+    </button>
   </div>
 </div>
 
@@ -2259,51 +2282,37 @@ async function openPixModal() {
   const { extras, totalValue } = calculateExtras();
   if (extras <= 0) return;
 
-  document.getElementById('pix-amount-display').textContent = formatCurrency(totalValue);
-  document.getElementById('pix-extras-detail').textContent = `${extras} foto(s) extra × ${formatCurrency(currentClientData.pricePerExtra)}`;
-
-  // Generate PIX
   const pixConfig = await loadPixConfig();
-  const pixKey = pixConfig ? pixConfig.key : 'fotogragrafo@email.com';
-  const pixName = pixConfig ? (pixConfig.name || 'Fotografo') : 'Fotografo';
-  const pixCity = pixConfig ? (pixConfig.city || 'SAO PAULO') : 'SAO PAULO';
-  const txid = 'FOTOSELECT' + Date.now().toString().slice(-10);
 
-  const pixPayload = generatePIXPayload({
-    pixKey, amount: totalValue, merchantName: pixName,
-    merchantCity: pixCity, txid, description: `Fotos extras - ${currentClientData.name}`
-  });
-
-  // Render QR Code
-  document.getElementById('qrcode-render').innerHTML = '';
-  try {
-    new QRCode(document.getElementById('qrcode-render'), {
-      text: pixPayload, width: 200, height: 200,
-      colorDark: '#000000', colorLight: '#ffffff',
-      correctLevel: QRCode.CorrectLevel.M
-    });
-  } catch(e) {
-    document.getElementById('qrcode-render').innerHTML = `<div style="width:200px;height:200px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:#333;text-align:center;padding:10px;">QR Code gerado</div>`;
+  if (!pixConfig || !pixConfig.key) {
+    showToast('Chave PIX não configurada. Avise o fotógrafo.', 'error');
+    return;
   }
 
-  document.getElementById('pix-string-display').textContent = pixPayload;
-  document.getElementById('btn-simulate-payment').classList.remove('hidden');
-  document.getElementById('btn-payment-confirmed').classList.add('hidden');
+  const tiposLabel = { email: 'E-mail', cpf: 'CPF', phone: 'Telefone', random: 'Chave Aleatória' };
+
+  // Preencher modal
+  document.getElementById('pix-amount-display').textContent = formatCurrency(totalValue);
+  document.getElementById('pix-amount-inline').textContent  = formatCurrency(totalValue);
+  document.getElementById('pix-extras-detail').textContent  = `${extras} foto(s) extra × ${formatCurrency(currentClientData.pricePerExtra)}`;
+  document.getElementById('pix-key-display').textContent    = pixConfig.key;
+  document.getElementById('pix-type-display').textContent   = tiposLabel[pixConfig.type] || pixConfig.type || '—';
+  document.getElementById('pix-name-display').textContent   = pixConfig.name || '—';
 
   openModal('modal-pix');
 }
 
-function simulatePayment() {
-  document.getElementById('btn-simulate-payment').classList.add('hidden');
-  document.getElementById('btn-payment-confirmed').classList.remove('hidden');
-  showToast('✅ Pagamento simulado! Agora confirme sua seleção.', 'success');
+function copyPixKey() {
+  const key = document.getElementById('pix-key-display').textContent;
+  copyText(key);
+  showToast('Chave PIX copiada!', 'success');
 }
 
 function onPaymentConfirmed() {
   paymentStatus = 'paid';
   closeModal('modal-pix');
   updateClientCounter();
-  showToast('Pagamento confirmado! Agora clique em "Confirmar Seleção"', 'success');
+  showToast('Ótimo! Agora clique em "Confirmar Seleção" para enviar suas fotos.', 'success');
 }
 
 // ============================================================
@@ -2640,11 +2649,7 @@ function crc16CCITT(str) {
   return crc;
 }
 
-function copyPixString() {
-  const txt = document.getElementById('pix-string-display').textContent;
-  copyText(txt);
-  showToast('Código PIX copiado!', 'success');
-}
+// copyPixString removed — use copyPixKey
 
 // ============================================================
 // ADMIN — TAB NAVIGATION
