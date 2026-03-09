@@ -1325,6 +1325,7 @@ CREATE POLICY "fs_storage_delete" ON storage.objects FOR DELETE TO anon USING (b
 // CONSTANTS
 // ============================================================
 const SUPABASE_URL_DEFAULT = 'https://rjyxkouegrropsarrhje.supabase.co';
+const SUPABASE_ANON_DEFAULT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJqeXhrb3VlZ3Jyb3BzYXJyaGplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1NjYxNjcsImV4cCI6MjA4NTE0MjE2N30.UjNPnVBVhQcUSirXeWZ3RmYmAhDMqqbbVUChG_Mv57U';
 const DB_NAME = 'fotoselectDB';
 const DB_VERSION = 2;
 let db = null;
@@ -1430,23 +1431,20 @@ async function initSupabase() {
     const urlSetting  = await dbGet('settings', 'supabase_url');
     const keySetting  = await dbGet('settings', 'supabase_key');
     const anonSetting = await dbGet('settings', 'supabase_anon');
+    // Sempre usa os valores fixos como fallback garantido
     const url  = (urlSetting  && urlSetting.value)  || SUPABASE_URL_DEFAULT;
-    const key  = keySetting  && keySetting.value;
-    const anon = anonSetting && anonSetting.value;
+    const key  = (keySetting  && keySetting.value)  || SUPABASE_ANON_DEFAULT;
+    const anon = (anonSetting && anonSetting.value) || SUPABASE_ANON_DEFAULT;
 
     // Preencher campos de UI — so existem no admin, nao na area do cliente
     const urlEl  = document.getElementById('config-supabase-url');
     const keyEl  = document.getElementById('config-supabase-key');
     const anonEl = document.getElementById('config-supabase-anon');
-    if (urlEl)          urlEl.value  = url;
-    if (keyEl  && key)  keyEl.value  = key;
-    if (anonEl && anon) anonEl.value = anon;
+    if (urlEl)  urlEl.value  = url;
+    if (keyEl)  keyEl.value  = key;
+    if (anonEl) anonEl.value = anon;
 
-    if (key) {
-      connectSupabase(url, key, anon || key);
-    } else {
-      updateSupabaseStatus(false);
-    }
+    connectSupabase(url, key, anon);
   } catch(e) {
     updateSupabaseStatus(false);
   }
@@ -1941,11 +1939,12 @@ async function buildClientLink(clientId) {
   const urlSetting  = await dbGet('settings', 'supabase_url');
   const anonSetting = await dbGet('settings', 'supabase_anon');
   const keySetting  = await dbGet('settings', 'supabase_key');
+  // Sempre embute credenciais no link — usa fixas como fallback garantido
   const sbUrl = (urlSetting  && urlSetting.value)  || SUPABASE_URL_DEFAULT;
-  const sbKey = (anonSetting && anonSetting.value) || (keySetting && keySetting.value) || '';
+  const sbKey = (anonSetting && anonSetting.value) || (keySetting && keySetting.value) || SUPABASE_ANON_DEFAULT;
   let link = `${baseUrl}?cliente=${clientId}`;
-  if (sbUrl) link += `&sbu=${encodeURIComponent(sbUrl)}`;
-  if (sbKey) link += `&sbk=${encodeURIComponent(sbKey)}`;
+  link += `&sbu=${encodeURIComponent(sbUrl)}`;
+  link += `&sbk=${encodeURIComponent(sbKey)}`;
   return link;
 }
 
@@ -2074,15 +2073,17 @@ async function loadClientArea(clientId) {
   const urlParams = new URLSearchParams(window.location.search);
   const sbUrlParam = urlParams.get('sbu');
   const sbKeyParam = urlParams.get('sbk');
-  if (sbUrlParam && sbKeyParam && !supabaseClient) {
+  // Conecta via params da URL ou usa credenciais fixas como fallback
+  const finalSbUrl = sbUrlParam ? decodeURIComponent(sbUrlParam) : SUPABASE_URL_DEFAULT;
+  const finalSbKey = sbKeyParam ? decodeURIComponent(sbKeyParam) : SUPABASE_ANON_DEFAULT;
+  if (!supabaseClient) {
     try {
       supabaseClient = window.supabase.createClient(
-        decodeURIComponent(sbUrlParam),
-        decodeURIComponent(sbKeyParam),
+        finalSbUrl, finalSbKey,
         { auth: { persistSession: false, autoRefreshToken: false } }
       );
-      console.log('Supabase conectado via URL params');
-    } catch(e) { console.warn('Falha ao conectar Supabase via URL:', e); }
+      console.log('Supabase conectado');
+    } catch(e) { console.warn('Falha ao conectar Supabase:', e); }
   }
 
   let client = await dbGet('clients', clientId);
