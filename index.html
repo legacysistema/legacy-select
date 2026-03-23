@@ -1817,7 +1817,9 @@ async function saveClient() {
       await supabaseClient.from('fs_clients').upsert({
         id: client.id, name: client.name, event: client.event,
         event_date: client.eventDate,
-        included_count: client.includedCount, price_per_extra: client.pricePerExtra
+        included_count: client.includedCount, price_per_extra: client.pricePerExtra,
+        pix_key: client.pixKey, pix_type: client.pixType,
+        pix_name: client.pixName, pix_city: client.pixCity
       });
     } catch(e) { console.warn('Supabase sync failed:', e); }
   }
@@ -2346,6 +2348,8 @@ async function loadClientArea(clientId) {
           id: data.id, name: data.name, event: data.event,
           eventDate: data.event_date,
           includedCount: data.included_count, pricePerExtra: data.price_per_extra,
+          pixKey: data.pix_key || '', pixType: data.pix_type || 'email',
+          pixName: data.pix_name || '', pixCity: data.pix_city || '',
           createdAt: data.created_at
         };
         await dbSet('clients', client);
