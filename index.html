@@ -903,7 +903,7 @@ body::before {
   <div id="lightbox-info">1 / 1</div>
 </div>
 
-<!-- ADMIN PANEL -->
+
 <div id="admin-panel" class="hidden">
   <div class="mobile-tabs">
     <button class="mobile-tab active" onclick="switchTab('dashboard')">Dashboard</button>
@@ -1130,38 +1130,7 @@ body::before {
         </div>
         <div class="divider"></div>
         <p style="font-size:0.8rem;color:var(--text3);margin-bottom:10px;">Execute este SQL no Supabase para criar as tabelas:</p>
-        <div class="sql-block">-- Tabelas FotoSelect
-CREATE TABLE IF NOT EXISTS fs_clients (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  name TEXT NOT NULL, event TEXT, email TEXT,
-  event_date DATE, included_count INTEGER DEFAULT 20,
-  price_per_extra DECIMAL(10,2) DEFAULT 25.00,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS fs_photos (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  client_id UUID REFERENCES fs_clients(id) ON DELETE CASCADE,
-  filename TEXT, storage_url TEXT, photo_order INTEGER,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS fs_selections (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  client_id UUID REFERENCES fs_clients(id) ON DELETE CASCADE UNIQUE,
-  selected_photo_ids TEXT[], extras_count INTEGER DEFAULT 0,
-  total_value DECIMAL(10,2) DEFAULT 0,
-  payment_status TEXT DEFAULT 'pending',
-  confirmed_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW()
-);
-INSERT INTO storage.buckets (id, name, public) VALUES ('galeria', 'galeria', true) ON CONFLICT DO NOTHING;
-ALTER TABLE fs_clients ENABLE ROW LEVEL SECURITY;
-ALTER TABLE fs_photos ENABLE ROW LEVEL SECURITY;
-ALTER TABLE fs_selections ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "fs_clients_all" ON fs_clients FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "fs_photos_all" ON fs_photos FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "fs_selections_all" ON fs_selections FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "fs_storage_insert" ON storage.objects FOR INSERT TO anon WITH CHECK (bucket_id = 'galeria');
-CREATE POLICY "fs_storage_select" ON storage.objects FOR SELECT TO anon USING (bucket_id = 'galeria');
-CREATE POLICY "fs_storage_delete" ON storage.objects FOR DELETE TO anon USING (bucket_id = 'galeria');</div>
+        <div class="sql-block">-- bloq</div>
       </div>
       <div class="glass-card" style="margin-top:20px;">
         <div class="config-section-title">Dados do Sistema</div>
@@ -1362,9 +1331,7 @@ CREATE POLICY "fs_storage_delete" ON storage.objects FOR DELETE TO anon USING (b
 </div>
 
 <script>
-// ============================================================
-// CONSTANTS
-// ============================================================
+
 const SUPABASE_URL_DEFAULT = 'https://rjyxkouegrropsarrhje.supabase.co';
 const SUPABASE_ANON_DEFAULT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJqeXhrb3VlZ3Jyb3BzYXJyaGplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1NjYxNjcsImV4cCI6MjA4NTE0MjE2N30.UjNPnVBVhQcUSirXeWZ3RmYmAhDMqqbbVUChG_Mv57U';
 const DB_NAME = 'fotoselectDB';
@@ -1381,9 +1348,7 @@ let lightboxPhotos = [];
 let selectionDetailClientId = null;
 let activeFilter = 'all';
 
-// ============================================================
-// INDEXEDDB
-// ============================================================
+
 function initDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -1458,9 +1423,7 @@ function dbClear(store) {
   });
 }
 
-// ============================================================
-// SUPABASE
-// ============================================================
+
 async function initSupabase() {
   try {
     const urlSetting  = await dbGet('settings', 'supabase_url');
@@ -1506,9 +1469,7 @@ function updateSupabaseStatus(connected) {
   if (txt) txt.textContent = connected ? 'Supabase: Conectado' : 'Supabase: Local';
 }
 
-// ============================================================
-// SYNC CLIENTS + SELECTIONS FROM SUPABASE → IndexedDB (admin)
-// ============================================================
+
 async function syncClientsFromSupabase() {
   if (!supabaseClient) return;
   try {
@@ -1619,11 +1580,7 @@ async function testSupabaseConnection(silent) {
   }
 }
 
-// ============================================================
-// *** ROUTER — CORRIGIDO ***
-// A correção principal: na área do cliente, o Supabase é conectado
-// PRIMEIRO usando os parâmetros da URL, antes de qualquer busca.
-// ============================================================
+
 async function init() {
   try {
     await initDB();
@@ -1631,7 +1588,7 @@ async function init() {
     const clienteId = params.get('cliente');
 
     if (clienteId) {
-      // ÁREA DO CLIENTE: conecta Supabase via params da URL ANTES de qualquer busca
+      
       const sbUrlParam = params.get('sbu');
       const sbKeyParam = params.get('sbk');
       const finalSbUrl = sbUrlParam ? decodeURIComponent(sbUrlParam) : SUPABASE_URL_DEFAULT;
@@ -1652,7 +1609,7 @@ async function init() {
         document.getElementById('loading-screen').classList.add('hidden');
       }, 600);
     } else {
-      // ÁREA DO ADMIN: verificar sessão Supabase primeiro
+      
       await initSupabase();
       await checkAuthAndInit();
     }
@@ -1664,9 +1621,7 @@ async function init() {
   }
 }
 
-// ============================================================
-// AUTH — LOGIN / LOGOUT
-// ============================================================
+
 let _authSupabase = null;
 
 function getAuthClient() {
@@ -1745,7 +1700,7 @@ async function doLogin() {
       return;
     }
 
-    // Login ok
+   
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('loading-screen').classList.remove('hidden');
     await loadPixConfig();
@@ -1775,9 +1730,7 @@ async function doLogout() {
   showToast('Sessão encerrada', 'info');
 }
 
-// ============================================================
-// ADMIN INIT
-// ============================================================
+
 async function initAdmin(user) {
   if (user) {
     const emailEl = document.getElementById('sidebar-user-email');
@@ -1790,9 +1743,7 @@ async function initAdmin(user) {
   await loadConfigForm();
 }
 
-// ============================================================
-// ADMIN — CLIENTS
-// ============================================================
+
 async function saveClient() {
   const name = document.getElementById('client-name').value.trim();
   const event = document.getElementById('client-event').value.trim();
@@ -1897,9 +1848,7 @@ async function deleteClient(id) {
   await refreshGalleryClientList();
 }
 
-// ============================================================
-// ADMIN — DASHBOARD
-// ============================================================
+
 async function loadDashboard() {
   await syncClientsFromSupabase();
   await syncSelectionsFromSupabase();
@@ -1940,9 +1889,7 @@ async function loadDashboard() {
   container.innerHTML = `<table class="data-table" style="min-width:700px;"><thead><tr><th>Cliente</th><th>Incluso</th><th>Upload</th><th>Selecionadas</th><th>Extras</th><th>Valor</th><th>Status</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
 
-// ============================================================
-// ADMIN — GALLERY
-// ============================================================
+
 async function refreshGalleryClientList() {
   const clients = await dbGetAll('clients');
   const sel = document.getElementById('gallery-client-select');
@@ -2165,9 +2112,7 @@ function copyClientLink() {
   showToast('Link copiado!', 'success');
 }
 
-// ============================================================
-// ADMIN — SELECTION DETAIL
-// ============================================================
+
 async function fetchPhotosForClient(clientId) {
   let photos = await dbGetByIndex('photos', 'clientId', clientId);
   if (!photos.length && supabaseClient) {
@@ -2264,9 +2209,7 @@ async function downloadAdminSelectionPDF() {
   await generatePDF(client, sel, selPhotos, 'admin');
 }
 
-// ============================================================
-// ADMIN — CONFIG
-// ============================================================
+
 async function loadConfigForm() {
   try {
     const pix = await dbGet('settings', 'pix_config');
@@ -2324,10 +2267,7 @@ async function loadPixConfig() {
   } catch(e) { return null; }
 }
 
-// ============================================================
-// *** CLIENT AREA — CORRIGIDO ***
-// Supabase já está conectado em init() antes desta função ser chamada.
-// ============================================================
+
 async function loadClientArea(clientId) {
   console.log('[Client] loadClientArea iniciado, supabase conectado:', !!supabaseClient);
 
@@ -2510,9 +2450,7 @@ function filterGallery(type) {
   renderClientGallery();
 }
 
-// ============================================================
-// PIX PAYMENT
-// ============================================================
+
 async function openPixModal() {
   const { extras, totalValue } = calculateExtras();
   if (extras <= 0) return;
@@ -2555,9 +2493,7 @@ function onPaymentConfirmed() {
   showToast('Ótimo! Agora clique em "Confirmar Seleção" para enviar suas fotos.', 'success');
 }
 
-// ============================================================
-// CONFIRM SELECTION
-// ============================================================
+
 async function openConfirmModal() {
   const selected = selectedPhotoIds.size;
   if (selected === 0) { showToast('Selecione pelo menos uma foto', 'warning'); return; }
@@ -2650,9 +2586,7 @@ async function redownloadPDF() {
   await generatePDF(currentClientData, sel, photos, 'client');
 }
 
-// ============================================================
-// PDF GENERATION
-// ============================================================
+
 async function downloadSelectionPDF() {
   const sel = {
     selectedPhotoIds: Array.from(selectedPhotoIds),
@@ -2736,9 +2670,7 @@ async function generatePDF(client, sel, photos, mode) {
   showToast('PDF gerado!', 'success');
 }
 
-// ============================================================
-// LIGHTBOX
-// ============================================================
+
 function openLightboxClient(index, e) {
   if (e) e.stopPropagation();
   lightboxIndex = index;
@@ -2779,9 +2711,7 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
-// ============================================================
-// ADMIN — TAB NAVIGATION
-// ============================================================
+
 function switchTab(tab) {
   ['dashboard','clientes','galeria','config'].forEach(t => {
     document.getElementById(`tab-${t}`).classList.add('hidden');
@@ -2798,9 +2728,7 @@ function switchTab(tab) {
   if (tab === 'clientes') refreshClientsList();
 }
 
-// ============================================================
-// EXPORT / CLEAR
-// ============================================================
+
 async function exportData() {
   const clients = await dbGetAll('clients');
   const selections = await dbGetAll('selections');
@@ -2826,9 +2754,7 @@ async function clearAllData() {
   showToast('Todos os dados apagados', 'info');
 }
 
-// ============================================================
-// MODAL HELPERS
-// ============================================================
+
 function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 document.querySelectorAll('.modal-overlay').forEach(m => {
@@ -2837,9 +2763,6 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
   });
 });
 
-// ============================================================
-// UTILITIES
-// ============================================================
 function generateId() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = Math.random() * 16 | 0;
@@ -2883,9 +2806,7 @@ document.addEventListener('contextmenu', function(e) {
   }
 });
 
-// ============================================================
-// INIT
-// ============================================================
+
 window.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
