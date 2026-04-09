@@ -2977,54 +2977,71 @@ async function separateOriginalPhotos() {
 
     addLog(`✓ Pasta destino criada: "${subfolderName}"`, 'var(--green)');
 
-    // 3. Indexa todos os arquivos da pasta de origem (recursivo 1 nível)
+    // 3. Indexa TODOS os arquivos da pasta por nome base (sem extensão), case-insensitive
     statusText.textContent = 'Lendo pasta de origem...';
-    addLog('→ Indexando arquivos da pasta de origem...', 'var(--blue)');
+    addLog('→ Indexando arquivos da pasta...', 'var(--blue)');
 
-    const sourceFiles = new Map(); // filename.toLowerCase() -> FileSystemFileHandle
+    const RAW_EXTS = new Set(['.cr2','.cr3','.nef','.arw','.raf','.orf','.rw2','.dng','.raw','.pef','.srw','.x3f']);
+
+    // byBasename: "img_0023" -> [ {name:"IMG_0023.CR2", handle}, {name:"IMG_0023.JPG", handle}, ... ]
+    const byBasename = new Map();
+    let totalFiles = 0;
+    let totalRaw = 0;
+
     for await (const [name, handle] of sourceDir.entries()) {
-      if (handle.kind === 'file') {
-        sourceFiles.set(name.toLowerCase(), handle);
-      }
+      if (handle.kind !== 'file') continue;
+      const dot = name.lastIndexOf('.');
+      const ext = dot >= 0 ? name.slice(dot).toLowerCase() : '';
+      const base = (dot >= 0 ? name.slice(0, dot) : name).toLowerCase();
+      if (!byBasename.has(base)) byBasename.set(base, []);
+      byBasename.get(base).push({ name, handle, ext });
+      totalFiles++;
+      if (RAW_EXTS.has(ext)) totalRaw++;
     }
-    addLog(`→ ${sourceFiles.size} arquivo(s) encontrado(s) na pasta de origem.`, 'var(--text2)');
 
-    // 4. Copia os selecionados
-    statusText.textContent = 'Copiando fotos selecionadas...';
+    addLog(`→ ${totalFiles} arquivo(s) na pasta  |  ${totalRaw} RAW/CR2 detectado(s)`, 'var(--text2)');
+
+    // 4. Para cada foto selecionada: busca pelo nome base, prioriza CR2/RAW
+    statusText.textContent = 'Copiando arquivos originais...';
     let copied = 0;
     const notFound = [];
 
     for (let i = 0; i < selectedFilenames.length; i++) {
       const fname = selectedFilenames[i];
-      const fnameLower = fname.toLowerCase();
-      const sourceHandle = sourceFiles.get(fnameLower);
+      const dot = fname.lastIndexOf('.');
+      const base = (dot >= 0 ? fname.slice(0, dot) : fname).toLowerCase();
 
-      const pct = Math.round(((i + 1) / selectedFilenames.length) * 100);
-      progressBar.style.width = pct + '%';
+      progressBar.style.width = Math.round(((i + 1) / selectedFilenames.length) * 100) + '%';
       countText.textContent = `${i + 1} / ${selectedFilenames.length}`;
 
-      if (!sourceHandle) {
+      const variants = byBasename.get(base) || [];
+
+      if (!variants.length) {
         notFound.push(fname);
-        addLog(`✕ Não encontrado: ${fname}`, 'var(--red)');
+        addLog(`✕ Não encontrado: ${fname}  (base: ${base})`, 'var(--red)');
         continue;
       }
 
+      // Ordem de preferência: CR2 > outros RAW > JPG/qualquer outro
+      const rawFile = variants.find(v => v.ext === '.cr2')
+                   || variants.find(v => RAW_EXTS.has(v.ext))
+                   || variants[0];
+
       try {
-        // Lê o arquivo original
-        const file = await sourceHandle.getFile();
+        const file = await rawFile.handle.getFile();
         const buffer = await file.arrayBuffer();
 
-        // Escreve no destino com o nome original
-        const destHandle = await subFolder.getFileHandle(fname, { create: true });
+        const destHandle = await subFolder.getFileHandle(rawFile.name, { create: true });
         const writable = await destHandle.createWritable();
         await writable.write(buffer);
         await writable.close();
 
         copied++;
-        addLog(`✓ ${fname}`, 'var(--green)');
+        const label = RAW_EXTS.has(rawFile.ext) ? `✓ [RAW] ${rawFile.name}` : `✓ ${rawFile.name}`;
+        addLog(label, RAW_EXTS.has(rawFile.ext) ? 'var(--green)' : 'var(--text)');
       } catch(e) {
         notFound.push(fname);
-        addLog(`✕ Erro ao copiar ${fname}: ${e.message}`, 'var(--red)');
+        addLog(`✕ Erro ao copiar ${rawFile.name}: ${e.message}`, 'var(--red)');
       }
     }
 
