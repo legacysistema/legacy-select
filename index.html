@@ -2952,13 +2952,13 @@ async function separateOriginalPhotos() {
   }
 
   try {
-    // 1. Usuário seleciona a pasta ORIGEM (onde estão os originais)
+    // 1. Usuário seleciona a pasta de origem (modo readwrite para poder criar subpasta dentro dela)
     statusText.textContent = 'Selecione a pasta com as fotos ORIGINAIS...';
-    addLog('→ Abrindo seletor de pasta de origem...', 'var(--blue)');
+    addLog('→ Abrindo seletor de pasta...', 'var(--blue)');
 
     let sourceDir;
     try {
-      sourceDir = await window.showDirectoryPicker({ mode: 'read', startIn: 'pictures' });
+      sourceDir = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'pictures' });
     } catch(e) {
       if (e.name === 'AbortError') {
         statusText.textContent = 'Cancelado.';
@@ -2968,28 +2968,12 @@ async function separateOriginalPhotos() {
       throw e;
     }
 
-    addLog(`✓ Pasta de origem: "${sourceDir.name}"`, 'var(--green)');
+    addLog(`✓ Pasta selecionada: "${sourceDir.name}"`, 'var(--green)');
 
-    // 2. Usuário seleciona (ou cria) a pasta DESTINO
-    statusText.textContent = 'Selecione a pasta de DESTINO para as fotos selecionadas...';
-    addLog('→ Abrindo seletor de pasta de destino...', 'var(--blue)');
-
-    let destDir;
-    try {
-      destDir = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'pictures' });
-    } catch(e) {
-      if (e.name === 'AbortError') {
-        statusText.textContent = 'Cancelado.';
-        addLog('✕ Seleção de destino cancelada.', 'var(--red)');
-        return;
-      }
-      throw e;
-    }
-
-    // Cria subpasta com nome do cliente dentro do destino
+    // 2. Cria subpasta dentro da própria pasta de origem
     const safeName = client.name.replace(/[^a-zA-Z0-9À-ÿ _-]/g, '').trim();
     const subfolderName = `Selecionadas_${safeName}`;
-    const subFolder = await destDir.getDirectoryHandle(subfolderName, { create: true });
+    const subFolder = await sourceDir.getDirectoryHandle(subfolderName, { create: true });
 
     addLog(`✓ Pasta destino criada: "${subfolderName}"`, 'var(--green)');
 
