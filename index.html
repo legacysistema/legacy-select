@@ -903,7 +903,7 @@ body::before {
   <div id="lightbox-info">1 / 1</div>
 </div>
 
-
+<!-- ADMIN PANEL -->
 <div id="admin-panel" class="hidden">
   <div class="mobile-tabs">
     <button class="mobile-tab active" onclick="switchTab('dashboard')">Dashboard</button>
@@ -1130,7 +1130,38 @@ body::before {
         </div>
         <div class="divider"></div>
         <p style="font-size:0.8rem;color:var(--text3);margin-bottom:10px;">Execute este SQL no Supabase para criar as tabelas:</p>
-        <div class="sql-block">-- bloq</div>
+        <div class="sql-block">-- Tabelas FotoSelect
+CREATE TABLE IF NOT EXISTS fs_clients (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL, event TEXT, email TEXT,
+  event_date DATE, included_count INTEGER DEFAULT 20,
+  price_per_extra DECIMAL(10,2) DEFAULT 25.00,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS fs_photos (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  client_id UUID REFERENCES fs_clients(id) ON DELETE CASCADE,
+  filename TEXT, storage_url TEXT, photo_order INTEGER,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS fs_selections (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  client_id UUID REFERENCES fs_clients(id) ON DELETE CASCADE UNIQUE,
+  selected_photo_ids TEXT[], extras_count INTEGER DEFAULT 0,
+  total_value DECIMAL(10,2) DEFAULT 0,
+  payment_status TEXT DEFAULT 'pending',
+  confirmed_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW()
+);
+INSERT INTO storage.buckets (id, name, public) VALUES ('galeria', 'galeria', true) ON CONFLICT DO NOTHING;
+ALTER TABLE fs_clients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fs_photos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fs_selections ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "fs_clients_all" ON fs_clients FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "fs_photos_all" ON fs_photos FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "fs_selections_all" ON fs_selections FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "fs_storage_insert" ON storage.objects FOR INSERT TO anon WITH CHECK (bucket_id = 'galeria');
+CREATE POLICY "fs_storage_select" ON storage.objects FOR SELECT TO anon USING (bucket_id = 'galeria');
+CREATE POLICY "fs_storage_delete" ON storage.objects FOR DELETE TO anon USING (bucket_id = 'galeria');</div>
       </div>
       <div class="glass-card" style="margin-top:20px;">
         <div class="config-section-title">Dados do Sistema</div>
@@ -1311,7 +1342,24 @@ body::before {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Baixar PDF
       </button>
+      <button class="btn btn-primary" onclick="separateOriginalPhotos()" id="btn-separate-originals" style="background:var(--blue);box-shadow:0 4px 16px var(--blue-glow);">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><polyline points="9 14 12 17 15 14"/></svg>
+        Separar Fotos Originais
+      </button>
       <button class="btn btn-danger btn-sm" onclick="deleteSelection()" id="btn-delete-selection">Excluir Seleção</button>
+    </div>
+    <!-- Painel de progresso da separação -->
+    <div id="separate-progress-panel" style="display:none;margin-top:20px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);padding:20px;">
+      <div style="font-size:0.8rem;color:var(--text2);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+        <span id="separate-status-text">Aguardando...</span>
+        <span id="separate-count-text" style="font-family:var(--font-mono);color:var(--green);"></span>
+      </div>
+      <div style="height:6px;background:var(--surface3);border-radius:3px;overflow:hidden;margin-bottom:14px;">
+        <div id="separate-progress-bar" style="height:100%;width:0%;background:var(--blue);border-radius:3px;transition:width 0.3s;"></div>
+      </div>
+      <div id="separate-log" style="max-height:180px;overflow-y:auto;font-family:var(--font-mono);font-size:0.72rem;color:var(--text3);display:flex;flex-direction:column;gap:3px;"></div>
+      <div id="separate-result" style="display:none;margin-top:14px;padding:12px 16px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:var(--r);font-size:0.85rem;color:var(--green);"></div>
+      <div id="separate-errors" style="display:none;margin-top:10px;padding:12px 16px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:var(--r);font-size:0.82rem;color:var(--red);"></div>
     </div>
   </div>
 </div>
@@ -1331,7 +1379,9 @@ body::before {
 </div>
 
 <script>
-
+// ============================================================
+// CONSTANTS
+// ============================================================
 const SUPABASE_URL_DEFAULT = 'https://rjyxkouegrropsarrhje.supabase.co';
 const SUPABASE_ANON_DEFAULT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJqeXhrb3VlZ3Jyb3BzYXJyaGplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1NjYxNjcsImV4cCI6MjA4NTE0MjE2N30.UjNPnVBVhQcUSirXeWZ3RmYmAhDMqqbbVUChG_Mv57U';
 const DB_NAME = 'fotoselectDB';
@@ -1348,7 +1398,9 @@ let lightboxPhotos = [];
 let selectionDetailClientId = null;
 let activeFilter = 'all';
 
-
+// ============================================================
+// INDEXEDDB
+// ============================================================
 function initDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -1423,7 +1475,9 @@ function dbClear(store) {
   });
 }
 
-
+// ============================================================
+// SUPABASE
+// ============================================================
 async function initSupabase() {
   try {
     const urlSetting  = await dbGet('settings', 'supabase_url');
@@ -1469,7 +1523,9 @@ function updateSupabaseStatus(connected) {
   if (txt) txt.textContent = connected ? 'Supabase: Conectado' : 'Supabase: Local';
 }
 
-
+// ============================================================
+// SYNC CLIENTS + SELECTIONS FROM SUPABASE → IndexedDB (admin)
+// ============================================================
 async function syncClientsFromSupabase() {
   if (!supabaseClient) return;
   try {
@@ -1580,7 +1636,11 @@ async function testSupabaseConnection(silent) {
   }
 }
 
-
+// ============================================================
+// *** ROUTER — CORRIGIDO ***
+// A correção principal: na área do cliente, o Supabase é conectado
+// PRIMEIRO usando os parâmetros da URL, antes de qualquer busca.
+// ============================================================
 async function init() {
   try {
     await initDB();
@@ -1588,7 +1648,7 @@ async function init() {
     const clienteId = params.get('cliente');
 
     if (clienteId) {
-      
+      // ÁREA DO CLIENTE: conecta Supabase via params da URL ANTES de qualquer busca
       const sbUrlParam = params.get('sbu');
       const sbKeyParam = params.get('sbk');
       const finalSbUrl = sbUrlParam ? decodeURIComponent(sbUrlParam) : SUPABASE_URL_DEFAULT;
@@ -1609,7 +1669,7 @@ async function init() {
         document.getElementById('loading-screen').classList.add('hidden');
       }, 600);
     } else {
-      
+      // ÁREA DO ADMIN: verificar sessão Supabase primeiro
       await initSupabase();
       await checkAuthAndInit();
     }
@@ -1621,7 +1681,9 @@ async function init() {
   }
 }
 
-
+// ============================================================
+// AUTH — LOGIN / LOGOUT
+// ============================================================
 let _authSupabase = null;
 
 function getAuthClient() {
@@ -1700,7 +1762,7 @@ async function doLogin() {
       return;
     }
 
-   
+    // Login ok
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('loading-screen').classList.remove('hidden');
     await loadPixConfig();
@@ -1730,7 +1792,9 @@ async function doLogout() {
   showToast('Sessão encerrada', 'info');
 }
 
-
+// ============================================================
+// ADMIN INIT
+// ============================================================
 async function initAdmin(user) {
   if (user) {
     const emailEl = document.getElementById('sidebar-user-email');
@@ -1743,7 +1807,9 @@ async function initAdmin(user) {
   await loadConfigForm();
 }
 
-
+// ============================================================
+// ADMIN — CLIENTS
+// ============================================================
 async function saveClient() {
   const name = document.getElementById('client-name').value.trim();
   const event = document.getElementById('client-event').value.trim();
@@ -1848,7 +1914,9 @@ async function deleteClient(id) {
   await refreshGalleryClientList();
 }
 
-
+// ============================================================
+// ADMIN — DASHBOARD
+// ============================================================
 async function loadDashboard() {
   await syncClientsFromSupabase();
   await syncSelectionsFromSupabase();
@@ -1889,7 +1957,9 @@ async function loadDashboard() {
   container.innerHTML = `<table class="data-table" style="min-width:700px;"><thead><tr><th>Cliente</th><th>Incluso</th><th>Upload</th><th>Selecionadas</th><th>Extras</th><th>Valor</th><th>Status</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
 
-
+// ============================================================
+// ADMIN — GALLERY
+// ============================================================
 async function refreshGalleryClientList() {
   const clients = await dbGetAll('clients');
   const sel = document.getElementById('gallery-client-select');
@@ -2112,7 +2182,9 @@ function copyClientLink() {
   showToast('Link copiado!', 'success');
 }
 
-
+// ============================================================
+// ADMIN — SELECTION DETAIL
+// ============================================================
 async function fetchPhotosForClient(clientId) {
   let photos = await dbGetByIndex('photos', 'clientId', clientId);
   if (!photos.length && supabaseClient) {
@@ -2177,6 +2249,9 @@ async function viewSelectionDetail(clientId) {
     </div>
   `;
   openModal('modal-selection-detail');
+  // Reset painel de separação sempre que abrir o modal
+  const pp = document.getElementById('separate-progress-panel');
+  if (pp) pp.style.display = 'none';
 }
 
 async function deleteSelection() {
@@ -2209,7 +2284,9 @@ async function downloadAdminSelectionPDF() {
   await generatePDF(client, sel, selPhotos, 'admin');
 }
 
-
+// ============================================================
+// ADMIN — CONFIG
+// ============================================================
 async function loadConfigForm() {
   try {
     const pix = await dbGet('settings', 'pix_config');
@@ -2267,7 +2344,10 @@ async function loadPixConfig() {
   } catch(e) { return null; }
 }
 
-
+// ============================================================
+// *** CLIENT AREA — CORRIGIDO ***
+// Supabase já está conectado em init() antes desta função ser chamada.
+// ============================================================
 async function loadClientArea(clientId) {
   console.log('[Client] loadClientArea iniciado, supabase conectado:', !!supabaseClient);
 
@@ -2450,7 +2530,9 @@ function filterGallery(type) {
   renderClientGallery();
 }
 
-
+// ============================================================
+// PIX PAYMENT
+// ============================================================
 async function openPixModal() {
   const { extras, totalValue } = calculateExtras();
   if (extras <= 0) return;
@@ -2493,7 +2575,9 @@ function onPaymentConfirmed() {
   showToast('Ótimo! Agora clique em "Confirmar Seleção" para enviar suas fotos.', 'success');
 }
 
-
+// ============================================================
+// CONFIRM SELECTION
+// ============================================================
 async function openConfirmModal() {
   const selected = selectedPhotoIds.size;
   if (selected === 0) { showToast('Selecione pelo menos uma foto', 'warning'); return; }
@@ -2586,7 +2670,9 @@ async function redownloadPDF() {
   await generatePDF(currentClientData, sel, photos, 'client');
 }
 
-
+// ============================================================
+// PDF GENERATION
+// ============================================================
 async function downloadSelectionPDF() {
   const sel = {
     selectedPhotoIds: Array.from(selectedPhotoIds),
@@ -2670,7 +2756,9 @@ async function generatePDF(client, sel, photos, mode) {
   showToast('PDF gerado!', 'success');
 }
 
-
+// ============================================================
+// LIGHTBOX
+// ============================================================
 function openLightboxClient(index, e) {
   if (e) e.stopPropagation();
   lightboxIndex = index;
@@ -2711,7 +2799,9 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
-
+// ============================================================
+// ADMIN — TAB NAVIGATION
+// ============================================================
 function switchTab(tab) {
   ['dashboard','clientes','galeria','config'].forEach(t => {
     document.getElementById(`tab-${t}`).classList.add('hidden');
@@ -2728,7 +2818,9 @@ function switchTab(tab) {
   if (tab === 'clientes') refreshClientsList();
 }
 
-
+// ============================================================
+// EXPORT / CLEAR
+// ============================================================
 async function exportData() {
   const clients = await dbGetAll('clients');
   const selections = await dbGetAll('selections');
@@ -2754,7 +2846,9 @@ async function clearAllData() {
   showToast('Todos os dados apagados', 'info');
 }
 
-
+// ============================================================
+// MODAL HELPERS
+// ============================================================
 function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 document.querySelectorAll('.modal-overlay').forEach(m => {
@@ -2763,6 +2857,9 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
   });
 });
 
+// ============================================================
+// UTILITIES
+// ============================================================
 function generateId() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = Math.random() * 16 | 0;
@@ -2806,7 +2903,172 @@ document.addEventListener('contextmenu', function(e) {
   }
 });
 
+// ============================================================
+// SEPARAR FOTOS ORIGINAIS — File System Access API
+// ============================================================
+async function separateOriginalPhotos() {
+  if (!selectionDetailClientId) return;
 
+  // Verifica suporte do navegador
+  if (!window.showDirectoryPicker) {
+    showToast('Seu navegador não suporta acesso a pastas. Use Chrome ou Edge.', 'error', 6000);
+    return;
+  }
+
+  const client = await dbGet('clients', selectionDetailClientId);
+  const sel = await dbGet('selections', selectionDetailClientId);
+  const allPhotos = await fetchPhotosForClient(selectionDetailClientId);
+  if (!sel || !sel.selectedPhotoIds.length) {
+    showToast('Nenhuma foto selecionada encontrada.', 'warning');
+    return;
+  }
+
+  // Nomes dos arquivos selecionados
+  const selectedPhotos = allPhotos.filter(p => sel.selectedPhotoIds.includes(p.id));
+  const selectedFilenames = selectedPhotos.map(p => p.filename);
+
+  const panel = document.getElementById('separate-progress-panel');
+  const statusText = document.getElementById('separate-status-text');
+  const countText = document.getElementById('separate-count-text');
+  const progressBar = document.getElementById('separate-progress-bar');
+  const log = document.getElementById('separate-log');
+  const resultDiv = document.getElementById('separate-result');
+  const errorsDiv = document.getElementById('separate-errors');
+
+  // Reset UI
+  panel.style.display = 'block';
+  progressBar.style.width = '0%';
+  log.innerHTML = '';
+  resultDiv.style.display = 'none';
+  errorsDiv.style.display = 'none';
+  countText.textContent = '';
+
+  function addLog(msg, color) {
+    const line = document.createElement('div');
+    line.style.color = color || 'var(--text3)';
+    line.textContent = msg;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  try {
+    // 1. Usuário seleciona a pasta ORIGEM (onde estão os originais)
+    statusText.textContent = 'Selecione a pasta com as fotos ORIGINAIS...';
+    addLog('→ Abrindo seletor de pasta de origem...', 'var(--blue)');
+
+    let sourceDir;
+    try {
+      sourceDir = await window.showDirectoryPicker({ mode: 'read', startIn: 'pictures' });
+    } catch(e) {
+      if (e.name === 'AbortError') {
+        statusText.textContent = 'Cancelado.';
+        addLog('✕ Seleção de pasta cancelada.', 'var(--red)');
+        return;
+      }
+      throw e;
+    }
+
+    addLog(`✓ Pasta de origem: "${sourceDir.name}"`, 'var(--green)');
+
+    // 2. Usuário seleciona (ou cria) a pasta DESTINO
+    statusText.textContent = 'Selecione a pasta de DESTINO para as fotos selecionadas...';
+    addLog('→ Abrindo seletor de pasta de destino...', 'var(--blue)');
+
+    let destDir;
+    try {
+      destDir = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'pictures' });
+    } catch(e) {
+      if (e.name === 'AbortError') {
+        statusText.textContent = 'Cancelado.';
+        addLog('✕ Seleção de destino cancelada.', 'var(--red)');
+        return;
+      }
+      throw e;
+    }
+
+    // Cria subpasta com nome do cliente dentro do destino
+    const safeName = client.name.replace(/[^a-zA-Z0-9À-ÿ _-]/g, '').trim();
+    const subfolderName = `Selecionadas_${safeName}`;
+    const subFolder = await destDir.getDirectoryHandle(subfolderName, { create: true });
+
+    addLog(`✓ Pasta destino criada: "${subfolderName}"`, 'var(--green)');
+
+    // 3. Indexa todos os arquivos da pasta de origem (recursivo 1 nível)
+    statusText.textContent = 'Lendo pasta de origem...';
+    addLog('→ Indexando arquivos da pasta de origem...', 'var(--blue)');
+
+    const sourceFiles = new Map(); // filename.toLowerCase() -> FileSystemFileHandle
+    for await (const [name, handle] of sourceDir.entries()) {
+      if (handle.kind === 'file') {
+        sourceFiles.set(name.toLowerCase(), handle);
+      }
+    }
+    addLog(`→ ${sourceFiles.size} arquivo(s) encontrado(s) na pasta de origem.`, 'var(--text2)');
+
+    // 4. Copia os selecionados
+    statusText.textContent = 'Copiando fotos selecionadas...';
+    let copied = 0;
+    const notFound = [];
+
+    for (let i = 0; i < selectedFilenames.length; i++) {
+      const fname = selectedFilenames[i];
+      const fnameLower = fname.toLowerCase();
+      const sourceHandle = sourceFiles.get(fnameLower);
+
+      const pct = Math.round(((i + 1) / selectedFilenames.length) * 100);
+      progressBar.style.width = pct + '%';
+      countText.textContent = `${i + 1} / ${selectedFilenames.length}`;
+
+      if (!sourceHandle) {
+        notFound.push(fname);
+        addLog(`✕ Não encontrado: ${fname}`, 'var(--red)');
+        continue;
+      }
+
+      try {
+        // Lê o arquivo original
+        const file = await sourceHandle.getFile();
+        const buffer = await file.arrayBuffer();
+
+        // Escreve no destino com o nome original
+        const destHandle = await subFolder.getFileHandle(fname, { create: true });
+        const writable = await destHandle.createWritable();
+        await writable.write(buffer);
+        await writable.close();
+
+        copied++;
+        addLog(`✓ ${fname}`, 'var(--green)');
+      } catch(e) {
+        notFound.push(fname);
+        addLog(`✕ Erro ao copiar ${fname}: ${e.message}`, 'var(--red)');
+      }
+    }
+
+    // 5. Resultado final
+    progressBar.style.width = '100%';
+    statusText.textContent = 'Concluído!';
+
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = `✅ <strong>${copied} foto(s)</strong> copiada(s) com sucesso para<br><strong>"${subfolderName}"</strong> dentro da pasta destino escolhida.`;
+
+    if (notFound.length > 0) {
+      errorsDiv.style.display = 'block';
+      errorsDiv.innerHTML = `⚠️ <strong>${notFound.length} arquivo(s) não encontrado(s)</strong> na pasta de origem:<br><span style="font-family:var(--font-mono);font-size:0.75rem;">${notFound.join(', ')}</span><br><small style="color:var(--text3);">Certifique-se de apontar a pasta exata onde estão os originais.</small>`;
+    }
+
+    showToast(`${copied} foto(s) separada(s) com sucesso!`, 'success', 5000);
+
+  } catch(e) {
+    statusText.textContent = 'Erro.';
+    addLog(`✕ Erro: ${e.message}`, 'var(--red)');
+    showToast('Erro ao separar fotos: ' + e.message, 'error', 6000);
+    console.error(e);
+  }
+}
+
+// ============================================================
+// INIT
+// ============================================================
 window.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
