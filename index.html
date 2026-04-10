@@ -1217,6 +1217,11 @@ CREATE TABLE IF NOT EXISTS fs_selections (
   confirmed_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW()
 );
 INSERT INTO storage.buckets (id, name, public) VALUES ('galeria', 'galeria', true) ON CONFLICT DO NOTHING;
+-- Roleta de Bônus (adicione estas colunas se ainda não existirem)
+ALTER TABLE fs_clients ADD COLUMN IF NOT EXISTS wheel_prize TEXT;
+ALTER TABLE fs_clients ADD COLUMN IF NOT EXISTS wheel_prize_icon TEXT;
+ALTER TABLE fs_clients ADD COLUMN IF NOT EXISTS wheel_prize_color TEXT;
+ALTER TABLE fs_clients ADD COLUMN IF NOT EXISTS wheel_spun_at TIMESTAMP;
 ALTER TABLE fs_clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fs_photos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fs_selections ENABLE ROW LEVEL SECURITY;
@@ -2400,12 +2405,22 @@ async function viewSelectionDetail(clientId) {
       ${selPhotos.map((p,i) => `<div class="sel-admin-photo"><img src="${p.dataUrl}" alt="#${i+1}" loading="lazy"><div class="sel-num">#${i+1}</div></div>`).join('')}
     </div>
   `;
-  // Show wheel bonus result if exists
-  const bwResult = (() => { try { return JSON.parse(localStorage.getItem(`wheelResult_${clientId}`)); } catch(e) { return null; } })();
+  // Show wheel bonus result — localStorage first, then Supabase fallback
+  let bwResult = null;
+  try { bwResult = JSON.parse(localStorage.getItem(`wheelResult_${clientId}`)); } catch(e) {}
+  // If not in localStorage (admin on different device), read from Supabase client row
+  if (!bwResult && supabaseClient && client) {
+    try {
+      const { data: cRow } = await supabaseClient.from("fs_clients").select("wheel_prize,wheel_prize_icon,wheel_prize_color,wheel_spun_at").eq("id", clientId).single();
+      if (cRow && cRow.wheel_prize) {
+        bwResult = { prize: { label: cRow.wheel_prize, icon: cRow.wheel_prize_icon || "gift", color: cRow.wheel_prize_color || "#22c55e" }, spunAt: cRow.wheel_spun_at };
+      }
+    } catch(e) { console.warn("[BW] Supabase prize read failed:", e); }
+  }
   if (bwResult) {
-    const iconKey = bwResult.prize.icon || 'gift';
-    const bwLine = `<div style="margin-bottom:16px;padding:10px 14px;background:rgba(240,169,75,.07);border:1px solid rgba(240,169,75,.2);border-radius:var(--r);font-size:.82rem;color:var(--gold);display:flex;align-items:center;gap:8px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="flex-shrink:0;">${(BW_ICONS||{})[iconKey]||''}</svg> Bônus sorteado: <strong>${bwResult.prize.label}</strong> — ${new Date(bwResult.spunAt).toLocaleString('pt-BR')}</div>`;
-    document.getElementById('sel-detail-content').innerHTML = bwLine + document.getElementById('sel-detail-content').innerHTML;
+    const iconKey = bwResult.prize.icon || "gift";
+    const bwLine = `<div style="margin-bottom:16px;padding:10px 14px;background:rgba(240,169,75,.07);border:1px solid rgba(240,169,75,.2);border-radius:var(--r);font-size:.82rem;color:var(--gold);display:flex;align-items:center;gap:8px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="flex-shrink:0;">${(BW_ICONS||{})[iconKey]||""}</svg> Bônus sorteado: <strong>${bwResult.prize.label}</strong> — ${new Date(bwResult.spunAt).toLocaleString("pt-BR")}</div>`;
+    document.getElementById("sel-detail-content").innerHTML = bwLine + document.getElementById("sel-detail-content").innerHTML;
   }
   openModal('modal-selection-detail');
   // Reset painel de separação sempre que abrir o modal
@@ -3623,7 +3638,18 @@ function bwShowResult(prize) {
 }
 
 function bwSavePrize(clientId, prize) {
-  try{localStorage.setItem(`wheelResult_${clientId}`,JSON.stringify({clientId,prize,spunAt:new Date().toISOString(),sessionId:generateId()}));}catch{}
+  const record = {clientId, prize, spunAt: new Date().toISOString(), sessionId: generateId()};
+  try { localStorage.setItem(`wheelResult_${clientId}`, JSON.stringify(record)); } catch(e) {}
+  const sbClient = (typeof window !== "undefined" && window._supabaseAnon) || (typeof supabaseClient !== "undefined" ? supabaseClient : null);
+  if (sbClient) {
+    sbClient.from("fs_clients").update({
+      wheel_prize: prize.label,
+      wheel_prize_icon: prize.icon || "gift",
+      wheel_prize_color: prize.color || "#22c55e",
+      wheel_spun_at: record.spunAt
+    }).eq("id", clientId)
+    .then(({error}) => { if(error) console.warn("[BW] Supabase prize sync failed:", error.message); });
+  }
 }
 
 function bwProceed() {
