@@ -2507,19 +2507,10 @@ async function buildClientLink(clientId) {
   // Para o link do cliente, usa ANON key (não service_role)
   const sbKey = (anonSetting && anonSetting.value) || SUPABASE_ANON_DEFAULT;
   let link = `${baseUrl}?cliente=${clientId}&sbu=${encodeURIComponent(sbUrl)}&sbk=${encodeURIComponent(sbKey)}`;
-  // Se a roleta estiver ativada, adiciona o flag + config codificada ao link.
-  // Isso garante que o celular do cliente veja os prêmios corretos mesmo se o
-  // Supabase (fs_settings) não estiver acessível e o localStorage estiver vazio.
+  // Se a roleta estiver ativada, adiciona o flag ao link para que o dispositivo do cliente
+  // possa exibi-la mesmo que o Supabase (fs_settings) não esteja acessível.
   const bwConfig = bwCfg();
-  if (bwConfig && bwConfig.enabled) {
-    link += '&bw=1';
-    try {
-      // Embutir config (sem o flag enabled para não conflitar) como fallback na URL
-      const cfgForUrl = JSON.parse(JSON.stringify(bwConfig));
-      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(cfgForUrl))));
-      link += '&bwcfg=' + encodeURIComponent(encoded);
-    } catch(e) { console.warn('[BW] Falha ao codificar config no link:', e); }
-  }
+  if (bwConfig && bwConfig.enabled) link += '&bw=1';
   return link;
 }
 
@@ -3788,31 +3779,18 @@ async function bwShowScreen(clientId) {
     _bwCfg = sbCfg;
     localStorage.setItem('bonusWheelConfig', JSON.stringify(sbCfg));
   }
-  // 2. Fallback: parâmetro bwcfg na URL (config embutida ao gerar o link do cliente)
-  //    Resolve o caso mais comum: celular do cliente sem fs_settings acessível e localStorage vazio.
-  if (!sbCfg) {
-    const urlParams = new URLSearchParams(window.location.search);
-    const bwcfgParam = urlParams.get('bwcfg');
-    if (bwcfgParam) {
-      try {
-        const urlCfg = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(bwcfgParam)))));
-        if (urlCfg && urlCfg.prizes && urlCfg.prizes.length) {
-          _bwCfg = urlCfg;
-          console.log('[BW] Config carregada do parâmetro bwcfg da URL. Prêmios:', urlCfg.prizes.length);
-        }
-      } catch(e) { console.warn('[BW] Falha ao decodificar bwcfg da URL:', e); }
-    }
-  }
-  // 3. Fallback final: localStorage (ou defaults se vazio)
+  // 2. Fallback: localStorage
   const cfg = bwCfg();
-  // 4. Verifica se a roleta está habilitada (flag bw=1 na URL como última saída)
+  // 3. Se nenhum dos dois tem config, verifica o parâmetro bw=1 na URL como fallback.
+  //    Isso resolve o caso em que o Supabase (fs_settings) não está acessível no dispositivo
+  //    do cliente e o localStorage está vazio (navegador diferente do admin).
   if (!cfg.enabled) {
     const urlBwEnabled = new URLSearchParams(window.location.search).get('bw') === '1';
     if (!urlBwEnabled) {
       console.log('[BW] Roleta desativada. cfg.enabled =', cfg.enabled, '| fonte:', sbCfg ? 'Supabase' : 'localStorage/default');
       return false;
     }
-    // Parâmetro bw=1 presente: garante que a roleta abre mesmo se enabled=false no cfg
+    // Parâmetro bw=1 presente: ativa a roleta com os prêmios padrão (ou os que vieram do Supabase parcialmente)
     console.log('[BW] Roleta ativada via parâmetro bw=1 da URL.');
     cfg.enabled = true;
   }
