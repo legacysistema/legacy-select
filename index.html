@@ -2513,18 +2513,23 @@ async function buildClientLink(clientId) {
   const bwConfig = bwCfg();
   if (bwConfig && bwConfig.enabled) {
     link += '&bw=1';
-    // Embute apenas os prêmios ativos no link como fallback,
-    // garantindo que o celular do cliente veja a config correta
-    // mesmo sem acesso à tabela fs_settings do Supabase.
+    // Embute config comprimida no link: só campos essenciais para girar a roleta.
+    // Descrições e campos secundários são carregados do Supabase em tempo real.
     try {
-      const payload = {
-        prizes: bwConfig.prizes,
-        title: bwConfig.title || '',
-        subtitle: bwConfig.subtitle || '',
-        accent: bwConfig.accent || '#22c55e',
-        showSkip: !!bwConfig.showSkip
+      const mini = {
+        p: bwConfig.prizes.filter(p => p.active !== false).map(p => ({
+          l: p.label,
+          i: p.icon || 'gift',
+          c: p.color || '#22c55e',
+          w: p.weight || 1,
+          d: p.description || ''
+        })),
+        t: bwConfig.title || '',
+        s: bwConfig.subtitle || '',
+        x: bwConfig.accent || '#22c55e',
+        k: bwConfig.showSkip ? 1 : 0
       };
-      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(mini))));
       link += '&bwcfg=' + encodeURIComponent(encoded);
     } catch(e) { console.warn('[BW] Falha ao codificar config no link:', e); }
   }
@@ -3797,10 +3802,29 @@ async function bwShowScreen(clientId) {
   const bwcfgParam = urlParams.get('bwcfg');
   if (bwcfgParam) {
     try {
-      const urlCfg = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(bwcfgParam)))));
+      const raw = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(bwcfgParam)))));
+      // Suporta formato comprimido {p,t,s,x,k} e formato legado {prizes,title,...}
+      let urlCfg;
+      if (raw && raw.p) {
+        // Formato mini (novo)
+        urlCfg = {
+          prizes: raw.p.map(p => ({
+            label: p.l, icon: p.i || 'gift', color: p.c || '#22c55e',
+            weight: p.w || 1, description: p.d || '', active: true
+          })),
+          title: raw.t || '',
+          subtitle: raw.s || '',
+          accent: raw.x || '#22c55e',
+          showSkip: !!raw.k,
+          enabled: true
+        };
+      } else if (raw && raw.prizes) {
+        // Formato legado (compatibilidade com links antigos)
+        urlCfg = { ...raw, enabled: true };
+      }
       if (urlCfg && urlCfg.prizes && urlCfg.prizes.length) {
-        _bwCfg = { ...urlCfg, enabled: true };
-        console.log('[BW] Config carregada do parâmetro bwcfg da URL. Prêmios:', urlCfg.prizes.length);
+        _bwCfg = urlCfg;
+        console.log('[BW] Config carregada do bwcfg da URL. Prêmios:', urlCfg.prizes.length);
       }
     } catch(e) { console.warn('[BW] Falha ao decodificar bwcfg da URL:', e); }
   }
