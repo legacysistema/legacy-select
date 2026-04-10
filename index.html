@@ -1217,7 +1217,14 @@ CREATE TABLE IF NOT EXISTS fs_selections (
   confirmed_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW()
 );
 INSERT INTO storage.buckets (id, name, public) VALUES ('galeria', 'galeria', true) ON CONFLICT DO NOTHING;
--- Roleta de Bônus (adicione estas colunas se ainda não existirem)
+-- Roleta de Bônus (adicione estas colunas e tabela se ainda não existirem)
+CREATE TABLE IF NOT EXISTS fs_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE POLICY "fs_settings_all" ON fs_settings FOR ALL TO anon USING (true) WITH CHECK (true);
+ALTER TABLE fs_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fs_clients ADD COLUMN IF NOT EXISTS wheel_prize TEXT;
 ALTER TABLE fs_clients ADD COLUMN IF NOT EXISTS wheel_prize_icon TEXT;
 ALTER TABLE fs_clients ADD COLUMN IF NOT EXISTS wheel_prize_color TEXT;
@@ -2594,7 +2601,7 @@ async function loadClientArea(clientId) {
     if (existingSel.paymentStatus === 'paid') paymentStatus = 'paid';
   }
 
-  const wheelShown = bwShowScreen(clientId);
+  const wheelShown = await bwShowScreen(clientId);
   if (wheelShown) {
     document.getElementById('bonus-wheel-screen')
       .querySelector('.bw-result-cta')
@@ -3288,6 +3295,29 @@ const BW_ICON_OPTIONS = Object.keys(BW_ICONS);
 
 let _bwCfg = null;
 
+// Helpers para ler/gravar config da roleta no Supabase (compartilhado entre navegadores)
+async function bwLoadCfgFromSupabase() {
+  const sb = (typeof supabaseClient !== 'undefined' && supabaseClient) || null;
+  if (!sb) return null;
+  try {
+    const { data } = await sb.from('fs_settings').select('value').eq('key', 'bonusWheelConfig').single();
+    if (data && data.value) return JSON.parse(data.value);
+  } catch(e) {}
+  return null;
+}
+
+async function bwPersistCfg(cfg) {
+  // Sempre salva no localStorage como cache imediato
+  localStorage.setItem('bonusWheelConfig', JSON.stringify(cfg));
+  // Salva no Supabase para compartilhar entre navegadores/dispositivos
+  const sb = (typeof supabaseClient !== 'undefined' && supabaseClient) || null;
+  if (sb) {
+    try {
+      await sb.from('fs_settings').upsert({ key: 'bonusWheelConfig', value: JSON.stringify(cfg), updated_at: new Date().toISOString() });
+    } catch(e) { console.warn('[BW] Supabase config sync failed:', e); }
+  }
+}
+
 function bwCfg() {
   if (!_bwCfg) {
     try { _bwCfg = JSON.parse(localStorage.getItem('bonusWheelConfig')); } catch(e){}
@@ -3300,7 +3330,6 @@ function bwToggleEnabled() {
   const cfg = bwCfg(); cfg.enabled = !cfg.enabled;
   document.getElementById('bw-toggle').classList.toggle('on', cfg.enabled);
   document.getElementById('bw-toggle-label').textContent = cfg.enabled ? 'Ativada' : 'Desativada';
-  localStorage.setItem('bonusWheelEnabled', cfg.enabled ? 'true' : 'false');
   bwAutoSave();
 }
 
@@ -3310,7 +3339,7 @@ function bwAutoSave() {
   cfg.subtitle = document.getElementById('bw-subtitle')?.value || cfg.subtitle;
   cfg.accent   = document.getElementById('bw-accent')?.value   || cfg.accent;
   cfg.showSkip = document.getElementById('bw-show-skip')?.checked || false;
-  localStorage.setItem('bonusWheelConfig', JSON.stringify(cfg));
+  bwPersistCfg(cfg); // grava no localStorage + Supabase
   bwPreview();
 }
 
@@ -3319,7 +3348,10 @@ function bwSave(toast) {
   if (toast) showToast('Configuração da roleta salva!', 'success');
 }
 
-function bwInitAdmin() {
+async function bwInitAdmin() {
+  // Tenta carregar config mais recente do Supabase antes de renderizar
+  const sbCfg = await bwLoadCfgFromSupabase();
+  if (sbCfg) { _bwCfg = sbCfg; localStorage.setItem('bonusWheelConfig', JSON.stringify(sbCfg)); }
   const cfg = bwCfg();
   const t = document.getElementById('bw-toggle');
   const lbl = document.getElementById('bw-toggle-label');
@@ -3440,11 +3472,14 @@ function bwPreview(){
 // ============================================================
 let _bwClientId=null, _bwPrize=null, _bwAngle=0, _bwAF=null, _bwLedIv=null, _bwLedPh=0, _bwCfAF=null;
 
-function bwShowScreen(clientId) {
+async function bwShowScreen(clientId) {
   _bwClientId = clientId;
   _bwCfg = null;
+  // Carrega config do Supabase (fonte de verdade entre navegadores)
+  const sbCfg = await bwLoadCfgFromSupabase();
+  if (sbCfg) { _bwCfg = sbCfg; localStorage.setItem('bonusWheelConfig', JSON.stringify(sbCfg)); }
   const cfg = bwCfg();
-  if (localStorage.getItem('bonusWheelEnabled') !== 'true') return false;
+  if (!cfg.enabled) return false;
   if (sessionStorage.getItem(`wheelSpun_${clientId}`)) return false;
 
   document.getElementById('bw-screen-title').textContent  = cfg.title   || 'Seu presente está aqui!';
