@@ -2321,7 +2321,12 @@ async function buildClientLink(clientId) {
   const sbUrl = (urlSetting  && urlSetting.value)  || SUPABASE_URL_DEFAULT;
   // Para o link do cliente, usa ANON key (não service_role)
   const sbKey = (anonSetting && anonSetting.value) || SUPABASE_ANON_DEFAULT;
-  return `${baseUrl}?cliente=${clientId}&sbu=${encodeURIComponent(sbUrl)}&sbk=${encodeURIComponent(sbKey)}`;
+  let link = `${baseUrl}?cliente=${clientId}&sbu=${encodeURIComponent(sbUrl)}&sbk=${encodeURIComponent(sbKey)}`;
+  // Se a roleta estiver ativada, adiciona o flag ao link para que o dispositivo do cliente
+  // possa exibi-la mesmo que o Supabase (fs_settings) não esteja acessível.
+  const bwConfig = bwCfg();
+  if (bwConfig && bwConfig.enabled) link += '&bw=1';
+  return link;
 }
 
 function isRunningLocally() {
@@ -3523,10 +3528,18 @@ async function bwShowScreen(clientId) {
   }
   // 2. Fallback: localStorage
   const cfg = bwCfg();
-  // 3. Se nenhum dos dois tem config, a roleta não foi configurada — não mostrar
+  // 3. Se nenhum dos dois tem config, verifica o parâmetro bw=1 na URL como fallback.
+  //    Isso resolve o caso em que o Supabase (fs_settings) não está acessível no dispositivo
+  //    do cliente e o localStorage está vazio (navegador diferente do admin).
   if (!cfg.enabled) {
-    console.log('[BW] Roleta desativada. cfg.enabled =', cfg.enabled, '| fonte:', sbCfg ? 'Supabase' : 'localStorage/default');
-    return false;
+    const urlBwEnabled = new URLSearchParams(window.location.search).get('bw') === '1';
+    if (!urlBwEnabled) {
+      console.log('[BW] Roleta desativada. cfg.enabled =', cfg.enabled, '| fonte:', sbCfg ? 'Supabase' : 'localStorage/default');
+      return false;
+    }
+    // Parâmetro bw=1 presente: ativa a roleta com os prêmios padrão (ou os que vieram do Supabase parcialmente)
+    console.log('[BW] Roleta ativada via parâmetro bw=1 da URL.');
+    cfg.enabled = true;
   }
   if (sessionStorage.getItem(`wheelSpun_${clientId}`)) return false;
 
