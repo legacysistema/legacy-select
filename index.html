@@ -1258,10 +1258,14 @@ CREATE POLICY "fs_storage_delete" ON storage.objects FOR DELETE TO anon USING (b
       <div class="page-header"><h2>Roleta de Bônus</h2><p>Configure a roleta que aparece antes da seleção do cliente</p></div>
       <div class="glass-card">
         <div class="card-title">Ativação</div>
-        <div style="display:flex;align-items:center;gap:14px;">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
           <div class="bw-toggle" id="bw-toggle" onclick="bwToggleEnabled()"><div class="bw-toggle-knob"></div></div>
           <span id="bw-toggle-label" style="font-size:.9rem;font-weight:500;">Desativada</span>
           <span style="font-size:.8rem;color:var(--text3);">— Quando ativa, clientes veem a roleta antes da seleção</span>
+        </div>
+        <div id="bw-settings-status" style="display:none;margin-top:12px;padding:10px 14px;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25);border-radius:var(--r);font-size:.82rem;color:var(--red);">
+          ⚠️ Tabela <code>fs_settings</code> não encontrada no Supabase — a roleta não abrirá em outros navegadores.
+          <button class="btn btn-secondary btn-sm" style="margin-left:12px;" onclick="bwCreateSettingsTable()">Verificar / Criar Tabela</button>
         </div>
       </div>
       <div class="glass-card" style="margin-top:16px;">
@@ -3300,9 +3304,11 @@ async function bwLoadCfgFromSupabase() {
   const sb = (typeof supabaseClient !== 'undefined' && supabaseClient) || null;
   if (!sb) return null;
   try {
-    const { data } = await sb.from('fs_settings').select('value').eq('key', 'bonusWheelConfig').single();
+    // maybeSingle() não lança erro se a tabela não tiver a row
+    const { data, error } = await sb.from('fs_settings').select('value').eq('key', 'bonusWheelConfig').maybeSingle();
+    if (error) { console.warn('[BW] fs_settings read error:', error.message); return null; }
     if (data && data.value) return JSON.parse(data.value);
-  } catch(e) {}
+  } catch(e) { console.warn('[BW] bwLoadCfgFromSupabase exception:', e); }
   return null;
 }
 
@@ -3311,10 +3317,44 @@ async function bwPersistCfg(cfg) {
   localStorage.setItem('bonusWheelConfig', JSON.stringify(cfg));
   // Salva no Supabase para compartilhar entre navegadores/dispositivos
   const sb = (typeof supabaseClient !== 'undefined' && supabaseClient) || null;
-  if (sb) {
-    try {
-      await sb.from('fs_settings').upsert({ key: 'bonusWheelConfig', value: JSON.stringify(cfg), updated_at: new Date().toISOString() });
-    } catch(e) { console.warn('[BW] Supabase config sync failed:', e); }
+  if (!sb) return;
+  try {
+    const { error } = await sb.from('fs_settings').upsert({
+      key: 'bonusWheelConfig',
+      value: JSON.stringify(cfg),
+      updated_at: new Date().toISOString()
+    });
+    if (error) {
+      console.warn('[BW] Supabase upsert error:', error.message);
+      // Mostra aviso visual se a tabela não existir
+      const el = document.getElementById('bw-settings-status');
+      if (el) {
+        el.textContent = '⚠️ Tabela fs_settings não encontrada no Supabase. Clique em "Criar Tabela" abaixo.';
+        el.style.display = 'block';
+      }
+    } else {
+      const el = document.getElementById('bw-settings-status');
+      if (el) el.style.display = 'none';
+    }
+  } catch(e) { console.warn('[BW] Supabase config sync failed:', e); }
+}
+
+async function bwCreateSettingsTable() {
+  const sb = (typeof supabaseClient !== 'undefined' && supabaseClient) || null;
+  if (!sb) { showToast('Supabase não conectado', 'error'); return; }
+  // Tenta fazer upsert — se falhar, instrui o usuário a rodar o SQL manualmente
+  try {
+    const { error } = await sb.from('fs_settings').upsert({ key: '__test__', value: 'ok', updated_at: new Date().toISOString() });
+    if (error) {
+      showToast('Execute o SQL da aba Config no Supabase para criar a tabela fs_settings', 'warning');
+      return;
+    }
+    await sb.from('fs_settings').delete().eq('key', '__test__');
+    showToast('Tabela fs_settings OK! Salve a configuração novamente.', 'success');
+    const el = document.getElementById('bw-settings-status');
+    if (el) el.style.display = 'none';
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'error');
   }
 }
 
@@ -3475,11 +3515,19 @@ let _bwClientId=null, _bwPrize=null, _bwAngle=0, _bwAF=null, _bwLedIv=null, _bwL
 async function bwShowScreen(clientId) {
   _bwClientId = clientId;
   _bwCfg = null;
-  // Carrega config do Supabase (fonte de verdade entre navegadores)
+  // 1. Tenta carregar do Supabase (compartilhado entre navegadores)
   const sbCfg = await bwLoadCfgFromSupabase();
-  if (sbCfg) { _bwCfg = sbCfg; localStorage.setItem('bonusWheelConfig', JSON.stringify(sbCfg)); }
+  if (sbCfg) {
+    _bwCfg = sbCfg;
+    localStorage.setItem('bonusWheelConfig', JSON.stringify(sbCfg));
+  }
+  // 2. Fallback: localStorage
   const cfg = bwCfg();
-  if (!cfg.enabled) return false;
+  // 3. Se nenhum dos dois tem config, a roleta não foi configurada — não mostrar
+  if (!cfg.enabled) {
+    console.log('[BW] Roleta desativada. cfg.enabled =', cfg.enabled, '| fonte:', sbCfg ? 'Supabase' : 'localStorage/default');
+    return false;
+  }
   if (sessionStorage.getItem(`wheelSpun_${clientId}`)) return false;
 
   document.getElementById('bw-screen-title').textContent  = cfg.title   || 'Seu presente está aqui!';
