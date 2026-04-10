@@ -2511,7 +2511,23 @@ async function buildClientLink(clientId) {
   // Isso garante que o celular do cliente veja os prêmios corretos mesmo se o
   // Supabase (fs_settings) não estiver acessível e o localStorage estiver vazio.
   const bwConfig = bwCfg();
-  if (bwConfig && bwConfig.enabled) link += '&bw=1';
+  if (bwConfig && bwConfig.enabled) {
+    link += '&bw=1';
+    // Embute apenas os prêmios ativos no link como fallback,
+    // garantindo que o celular do cliente veja a config correta
+    // mesmo sem acesso à tabela fs_settings do Supabase.
+    try {
+      const payload = {
+        prizes: bwConfig.prizes,
+        title: bwConfig.title || '',
+        subtitle: bwConfig.subtitle || '',
+        accent: bwConfig.accent || '#22c55e',
+        showSkip: !!bwConfig.showSkip
+      };
+      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      link += '&bwcfg=' + encodeURIComponent(encoded);
+    } catch(e) { console.warn('[BW] Falha ao codificar config no link:', e); }
+  }
   return link;
 }
 
@@ -3774,27 +3790,31 @@ let _bwClientId=null, _bwPrize=null, _bwAngle=0, _bwAF=null, _bwLedIv=null, _bwL
 async function bwShowScreen(clientId) {
   _bwClientId = clientId;
   _bwCfg = null;
-  // 1. Tenta carregar do Supabase (compartilhado entre navegadores)
-  const sbCfg = await bwLoadCfgFromSupabase();
-  if (sbCfg) {
-    _bwCfg = sbCfg;
-    localStorage.setItem('bonusWheelConfig', JSON.stringify(sbCfg));
+
+  // 1. Prioridade máxima: parâmetro bwcfg na URL
+  //    Foi embutido pelo admin no momento de gerar o link — é sempre a config mais atualizada.
+  const urlParams = new URLSearchParams(window.location.search);
+  const bwcfgParam = urlParams.get('bwcfg');
+  if (bwcfgParam) {
+    try {
+      const urlCfg = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(bwcfgParam)))));
+      if (urlCfg && urlCfg.prizes && urlCfg.prizes.length) {
+        _bwCfg = { ...urlCfg, enabled: true };
+        console.log('[BW] Config carregada do parâmetro bwcfg da URL. Prêmios:', urlCfg.prizes.length);
+      }
+    } catch(e) { console.warn('[BW] Falha ao decodificar bwcfg da URL:', e); }
   }
-  // 2. Fallback: parâmetro bwcfg na URL (config embutida ao gerar o link do cliente)
-  //    Resolve o caso mais comum: celular do cliente sem fs_settings acessível e localStorage vazio.
-  if (!sbCfg) {
-    const urlParams = new URLSearchParams(window.location.search);
-    const bwcfgParam = urlParams.get('bwcfg');
-    if (bwcfgParam) {
-      try {
-        const urlCfg = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(bwcfgParam)))));
-        if (urlCfg && urlCfg.prizes && urlCfg.prizes.length) {
-          _bwCfg = urlCfg;
-          console.log('[BW] Config carregada do parâmetro bwcfg da URL. Prêmios:', urlCfg.prizes.length);
-        }
-      } catch(e) { console.warn('[BW] Falha ao decodificar bwcfg da URL:', e); }
+
+  // 2. Fallback: tenta carregar do Supabase (útil se o link foi gerado sem bwcfg)
+  if (!_bwCfg) {
+    const sbCfg = await bwLoadCfgFromSupabase();
+    if (sbCfg) {
+      _bwCfg = sbCfg;
+      localStorage.setItem('bonusWheelConfig', JSON.stringify(sbCfg));
+      console.log('[BW] Config carregada do Supabase.');
     }
   }
+
   // 3. Fallback final: localStorage (ou defaults se vazio)
   const cfg = bwCfg();
   // 4. Verifica se a roleta está habilitada (flag bw=1 na URL como última saída)
