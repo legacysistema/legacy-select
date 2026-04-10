@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rodrigo Costa Fotografia — Sistema de Seleção de Fotos</title>
+<title>Legacy Select — Sistema de Seleção de Fotos</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
@@ -1081,7 +1081,7 @@ body::before {
           <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
         </svg>
       </div>
-      <h1>Rodrigo Costa<span>Fotografia</span></h1>
+      <h1>Legacy<span>Select</span></h1>
       <small>Acesso ao Painel Administrativo</small>
     </div>
     <div class="login-form-title">Entrar com sua conta</div>
@@ -1132,7 +1132,7 @@ body::before {
   </div>
   <div id="sidebar">
     <div class="sidebar-logo">
-      <h1>Rodrigo Costa<span>Fotografia</span></h1>
+      <h1>Legacy<span>Select</span></h1>
       <small>Painel Administrativo</small>
     </div>
     <div class="nav-label">Menu Principal</div>
@@ -1542,7 +1542,7 @@ CREATE POLICY "fs_storage_delete" ON storage.objects FOR DELETE TO anon USING (b
 
   <!-- Top bar -->
   <div class="bw-top-bar">
-    <div class="bw-top-logo">Rodrigo Costa<span>Fotografia</span></div>
+    <div class="bw-top-logo">Legacy<span>Select</span></div>
     <div class="bw-top-badge">✦ Experiência Exclusiva</div>
   </div>
 
@@ -3828,7 +3828,31 @@ async function bwShowScreen(clientId) {
     console.log('[BW] Roleta ativada via parâmetro bw=1 da URL.');
     cfg.enabled = true;
   }
-  if (sessionStorage.getItem(`wheelSpun_${clientId}`)) return false;
+  // ── Verificação 1: localStorage (persiste entre sessões no mesmo navegador)
+  const localSpun = localStorage.getItem(`wheelSpun_${clientId}`);
+  if (localSpun) {
+    console.log('[BW] Roleta já girada (localStorage). Bloqueando.');
+    return false;
+  }
+
+  // ── Verificação 2: Supabase (fonte de verdade — bloqueia em qualquer dispositivo/navegador)
+  const sbClient = (typeof window !== 'undefined' && window._supabaseAnon) ||
+                   (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+  if (sbClient) {
+    try {
+      const { data: clientRow } = await sbClient
+        .from('fs_clients')
+        .select('wheel_spun_at')
+        .eq('id', clientId)
+        .single();
+      if (clientRow && clientRow.wheel_spun_at) {
+        console.log('[BW] Roleta já girada (Supabase). Bloqueando.');
+        // Sincroniza localStorage para acelerar futuras verificações
+        localStorage.setItem(`wheelSpun_${clientId}`, clientRow.wheel_spun_at);
+        return false;
+      }
+    } catch(e) { console.warn('[BW] Falha ao verificar wheel_spun_at no Supabase:', e); }
+  }
 
   document.getElementById('bw-screen-title').textContent  = cfg.title   || 'Seu presente está aqui!';
   document.getElementById('bw-screen-subtitle').textContent = cfg.subtitle || 'Gire a roleta e ganhe um bônus especial';
@@ -3845,7 +3869,7 @@ async function bwShowScreen(clientId) {
   if (window.matchMedia('(prefers-reduced-motion:reduce)').matches) {
     _bwPrize = bwWeighted(cfg.prizes);
     bwSavePrize(clientId, _bwPrize);
-    sessionStorage.setItem(`wheelSpun_${clientId}`, 'true');
+    localStorage.setItem(`wheelSpun_${clientId}`, new Date().toISOString());
     document.getElementById('bonus-wheel-screen').classList.remove('hidden');
     bwShowResult(_bwPrize);
     return true;
@@ -3994,7 +4018,7 @@ function bwSpin() {
           if(ptr){ptr.classList.add('ping');setTimeout(()=>ptr.classList.remove('ping'),400);}
           bwWin();
           bwSavePrize(_bwClientId,_bwPrize);
-          sessionStorage.setItem(`wheelSpun_${_bwClientId}`,'true');
+          localStorage.setItem(`wheelSpun_${_bwClientId}`, new Date().toISOString());
           setTimeout(()=>bwShowResult(_bwPrize),600);
         }
       }
@@ -4044,7 +4068,7 @@ function bwProceed() {
 }
 
 function bwSkip() {
-  sessionStorage.setItem(`wheelSpun_${_bwClientId}`,'true');
+  localStorage.setItem(`wheelSpun_${_bwClientId}`, new Date().toISOString());
   document.getElementById('bonus-wheel-screen').classList.add('hidden');
   if(_bwLedIv){clearInterval(_bwLedIv);_bwLedIv=null;}
 }
