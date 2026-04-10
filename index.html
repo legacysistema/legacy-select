@@ -2513,8 +2513,20 @@ async function buildClientLink(clientId) {
   const bwConfig = bwCfg();
   if (bwConfig && bwConfig.enabled) {
     link += '&bw=1';
-    // A config da roleta é carregada do Supabase (fs_settings) em tempo real.
-    // Não embutimos mais o bwcfg na URL para manter o link curto.
+    // Embute apenas os prêmios ativos no link como fallback,
+    // garantindo que o celular do cliente veja a config correta
+    // mesmo sem acesso à tabela fs_settings do Supabase.
+    try {
+      const payload = {
+        prizes: bwConfig.prizes,
+        title: bwConfig.title || '',
+        subtitle: bwConfig.subtitle || '',
+        accent: bwConfig.accent || '#22c55e',
+        showSkip: !!bwConfig.showSkip
+      };
+      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      link += '&bwcfg=' + encodeURIComponent(encoded);
+    } catch(e) { console.warn('[BW] Falha ao codificar config no link:', e); }
   }
   return link;
 }
