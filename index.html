@@ -3910,8 +3910,9 @@ async function bwShowScreen(clientId) {
   }
 
   // 2. Fallback: tenta carregar do Supabase (útil se o link foi gerado sem bwcfg)
+  let sbCfg = null;
   if (!_bwCfg) {
-    const sbCfg = await bwLoadCfgFromSupabase();
+    sbCfg = await bwLoadCfgFromSupabase();
     if (sbCfg) {
       _bwCfg = sbCfg;
       safeLS.setItem('bonusWheelConfig', JSON.stringify(sbCfg));
