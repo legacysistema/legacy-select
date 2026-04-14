@@ -1751,80 +1751,182 @@ let lightboxPhotos = [];
 let selectionDetailClientId = null;
 let activeFilter = 'all';
 
+// Safe localStorage wrapper — iOS Safari modo privado bloqueia localStorage
+const _lsCache = {};
+const safeLS = {
+  getItem(k) { try { return safeLS.getItem(k); } catch(e) { return _lsCache[k] || null; } },
+  setItem(k, v) { try { safeLS.setItem(k, v); } catch(e) { _lsCache[k] = v; } },
+  removeItem(k) { try { safeLS.removeItem(k); } catch(e) { delete _lsCache[k]; } }
+};
+
 // ============================================================
-// INDEXEDDB
+// INDEXEDDB — com fallback in-memory para Safari/iOS WebView
+// Safari no modo privado e WebViews do WhatsApp/iOS bloqueiam
+// o IndexedDB. Usamos um Map em memória como fallback para que
+// a área do cliente funcione mesmo sem persistência local.
 // ============================================================
+let _useMemoryDB = false;
+const _memDB = { clients:{}, photos:{}, selections:{}, settings:{} };
+
 function initDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onerror = () => reject(req.error);
-    req.onsuccess = () => { db = req.result; resolve(db); };
-    req.onupgradeneeded = (e) => {
-      const d = e.target.result;
-      if (!d.objectStoreNames.contains('clients')) {
-        const cs = d.createObjectStore('clients', { keyPath: 'id' });
-        cs.createIndex('name', 'name', { unique: false });
+  return new Promise((resolve) => {
+    // Timeout de segurança: se o IndexedDB não responder em 3s, usa memória
+    let resolved = false;
+    const fallback = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        console.warn('[DB] IndexedDB timeout — usando fallback in-memory (Safari/iOS WebView)');
+        _useMemoryDB = true;
+        resolve(null);
       }
-      if (!d.objectStoreNames.contains('photos')) {
-        const ps = d.createObjectStore('photos', { keyPath: 'id' });
-        ps.createIndex('clientId', 'clientId', { unique: false });
-      }
-      if (!d.objectStoreNames.contains('selections')) {
-        d.createObjectStore('selections', { keyPath: 'clientId' });
-      }
-      if (!d.objectStoreNames.contains('settings')) {
-        d.createObjectStore('settings', { keyPath: 'key' });
-      }
-    };
+    }, 3000);
+
+    try {
+      if (!window.indexedDB) throw new Error('IndexedDB não disponível');
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onerror = () => {
+        if (resolved) return; resolved = true; clearTimeout(fallback);
+        console.warn('[DB] IndexedDB erro — usando fallback in-memory:', req.error);
+        _useMemoryDB = true;
+        resolve(null);
+      };
+      req.onsuccess = () => {
+        if (resolved) return; resolved = true; clearTimeout(fallback);
+        db = req.result;
+        // Testa se consegue abrir uma transação (falha em Safari modo privado)
+        try {
+          const tx = db.transaction('clients', 'readonly');
+          tx.abort();
+          resolve(db);
+        } catch(e) {
+          console.warn('[DB] IndexedDB transação falhou — usando fallback in-memory:', e);
+          _useMemoryDB = true;
+          resolve(null);
+        }
+      };
+      req.onupgradeneeded = (e) => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains('clients')) {
+          const cs = d.createObjectStore('clients', { keyPath: 'id' });
+          cs.createIndex('name', 'name', { unique: false });
+        }
+        if (!d.objectStoreNames.contains('photos')) {
+          const ps = d.createObjectStore('photos', { keyPath: 'id' });
+          ps.createIndex('clientId', 'clientId', { unique: false });
+        }
+        if (!d.objectStoreNames.contains('selections')) {
+          d.createObjectStore('selections', { keyPath: 'clientId' });
+        }
+        if (!d.objectStoreNames.contains('settings')) {
+          d.createObjectStore('settings', { keyPath: 'key' });
+        }
+      };
+      req.onblocked = () => {
+        if (resolved) return; resolved = true; clearTimeout(fallback);
+        console.warn('[DB] IndexedDB bloqueado — usando fallback in-memory');
+        _useMemoryDB = true;
+        resolve(null);
+      };
+    } catch(e) {
+      if (resolved) return; resolved = true; clearTimeout(fallback);
+      console.warn('[DB] IndexedDB exceção — usando fallback in-memory:', e);
+      _useMemoryDB = true;
+      resolve(null);
+    }
   });
 }
+
+// Helpers do fallback in-memory
+function _memKeyFor(store, value) {
+  if (store === 'clients') return value.id;
+  if (store === 'photos') return value.id;
+  if (store === 'selections') return value.clientId;
+  if (store === 'settings') return value.key;
+  return value.id || value.key;
+}
+
 function dbSet(store, value) {
+  if (_useMemoryDB) {
+    const k = _memKeyFor(store, value);
+    _memDB[store][k] = value;
+    return Promise.resolve(k);
+  }
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readwrite');
-    const req = tx.objectStore(store).put(value);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    try {
+      const tx = db.transaction(store, 'readwrite');
+      const req = tx.objectStore(store).put(value);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch(e) { reject(e); }
   });
 }
 function dbGet(store, key) {
+  if (_useMemoryDB) {
+    return Promise.resolve(_memDB[store][key] || undefined);
+  }
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readonly');
-    const req = tx.objectStore(store).get(key);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    try {
+      const tx = db.transaction(store, 'readonly');
+      const req = tx.objectStore(store).get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch(e) { reject(e); }
   });
 }
 function dbGetAll(store) {
+  if (_useMemoryDB) {
+    return Promise.resolve(Object.values(_memDB[store]));
+  }
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readonly');
-    const req = tx.objectStore(store).getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    try {
+      const tx = db.transaction(store, 'readonly');
+      const req = tx.objectStore(store).getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch(e) { reject(e); }
   });
 }
 function dbGetByIndex(store, indexName, value) {
+  if (_useMemoryDB) {
+    const all = Object.values(_memDB[store]);
+    return Promise.resolve(all.filter(item => item[indexName] === value));
+  }
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readonly');
-    const idx = tx.objectStore(store).index(indexName);
-    const req = idx.getAll(value);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    try {
+      const tx = db.transaction(store, 'readonly');
+      const idx = tx.objectStore(store).index(indexName);
+      const req = idx.getAll(value);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch(e) { reject(e); }
   });
 }
 function dbDelete(store, key) {
+  if (_useMemoryDB) {
+    delete _memDB[store][key];
+    return Promise.resolve();
+  }
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readwrite');
-    const req = tx.objectStore(store).delete(key);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
+    try {
+      const tx = db.transaction(store, 'readwrite');
+      const req = tx.objectStore(store).delete(key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    } catch(e) { reject(e); }
   });
 }
 function dbClear(store) {
+  if (_useMemoryDB) {
+    _memDB[store] = {};
+    return Promise.resolve();
+  }
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readwrite');
-    const req = tx.objectStore(store).clear();
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
+    try {
+      const tx = db.transaction(store, 'readwrite');
+      const req = tx.objectStore(store).clear();
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    } catch(e) { reject(e); }
   });
 }
 
@@ -1996,6 +2098,7 @@ async function testSupabaseConnection(silent) {
 // ============================================================
 async function init() {
   try {
+    // initDB nunca rejeita — usa fallback in-memory se necessário (Safari/iOS WebView)
     await initDB();
     const params = new URLSearchParams(window.location.search);
     const clienteId = params.get('cliente');
@@ -2625,7 +2728,7 @@ async function viewSelectionDetail(clientId) {
   `;
   // Show wheel bonus result — localStorage first, then Supabase fallback
   let bwResult = null;
-  try { bwResult = JSON.parse(localStorage.getItem(`wheelResult_${clientId}`)); } catch(e) {}
+  try { bwResult = JSON.parse(safeLS.getItem(`wheelResult_${clientId}`)); } catch(e) {}
   // If not in localStorage (admin on different device), read from Supabase client row
   if (!bwResult && supabaseClient && client) {
     try {
@@ -2741,9 +2844,10 @@ async function loadPixConfig() {
 // Supabase já está conectado em init() antes desta função ser chamada.
 // ============================================================
 async function loadClientArea(clientId) {
-  console.log('[Client] loadClientArea iniciado, supabase conectado:', !!supabaseClient);
+  console.log('[Client] loadClientArea iniciado, supabase conectado:', !!supabaseClient, '| DB mode:', _useMemoryDB ? 'memory' : 'IndexedDB');
 
-  let client = await dbGet('clients', clientId);
+  let client = null;
+  try { client = await dbGet('clients', clientId); } catch(e) { console.warn('[Client] dbGet clients falhou:', e); }
 
   // Se não está no IndexedDB local, busca no Supabase
   if (!client && supabaseClient) {
@@ -3521,7 +3625,7 @@ async function bwLoadCfgFromSupabase() {
 
 async function bwPersistCfg(cfg) {
   // Sempre salva no localStorage como cache imediato
-  localStorage.setItem('bonusWheelConfig', JSON.stringify(cfg));
+  safeLS.setItem('bonusWheelConfig', JSON.stringify(cfg));
   // Salva no Supabase para compartilhar entre navegadores/dispositivos
   const sb = (typeof supabaseClient !== 'undefined' && supabaseClient) || null;
   if (!sb) return;
@@ -3567,7 +3671,7 @@ async function bwCreateSettingsTable() {
 
 function bwCfg() {
   if (!_bwCfg) {
-    try { _bwCfg = JSON.parse(localStorage.getItem('bonusWheelConfig')); } catch(e){}
+    try { _bwCfg = JSON.parse(safeLS.getItem('bonusWheelConfig')); } catch(e){}
     if (!_bwCfg) _bwCfg = {enabled:false,title:'Seu presente está aqui!',subtitle:'Gire a roleta e ganhe um bônus especial',accent:'#22c55e',showSkip:false,prizes:JSON.parse(JSON.stringify(BW_DEFAULTS))};
   }
   return _bwCfg;
@@ -3598,7 +3702,7 @@ function bwSave(toast) {
 async function bwInitAdmin() {
   // Tenta carregar config mais recente do Supabase antes de renderizar
   const sbCfg = await bwLoadCfgFromSupabase();
-  if (sbCfg) { _bwCfg = sbCfg; localStorage.setItem('bonusWheelConfig', JSON.stringify(sbCfg)); }
+  if (sbCfg) { _bwCfg = sbCfg; safeLS.setItem('bonusWheelConfig', JSON.stringify(sbCfg)); }
   const cfg = bwCfg();
   const t = document.getElementById('bw-toggle');
   const lbl = document.getElementById('bw-toggle-label');
@@ -3810,7 +3914,7 @@ async function bwShowScreen(clientId) {
     const sbCfg = await bwLoadCfgFromSupabase();
     if (sbCfg) {
       _bwCfg = sbCfg;
-      localStorage.setItem('bonusWheelConfig', JSON.stringify(sbCfg));
+      safeLS.setItem('bonusWheelConfig', JSON.stringify(sbCfg));
       console.log('[BW] Config carregada do Supabase.');
     }
   }
@@ -3829,7 +3933,7 @@ async function bwShowScreen(clientId) {
     cfg.enabled = true;
   }
   // ── Verificação 1: localStorage (persiste entre sessões no mesmo navegador)
-  const localSpun = localStorage.getItem(`wheelSpun_${clientId}`);
+  const localSpun = safeLS.getItem(`wheelSpun_${clientId}`);
   if (localSpun) {
     console.log('[BW] Roleta já girada (localStorage). Bloqueando.');
     return false;
@@ -3848,7 +3952,7 @@ async function bwShowScreen(clientId) {
       if (clientRow && clientRow.wheel_spun_at) {
         console.log('[BW] Roleta já girada (Supabase). Bloqueando.');
         // Sincroniza localStorage para acelerar futuras verificações
-        localStorage.setItem(`wheelSpun_${clientId}`, clientRow.wheel_spun_at);
+        safeLS.setItem(`wheelSpun_${clientId}`, clientRow.wheel_spun_at);
         return false;
       }
     } catch(e) { console.warn('[BW] Falha ao verificar wheel_spun_at no Supabase:', e); }
@@ -3869,7 +3973,7 @@ async function bwShowScreen(clientId) {
   if (window.matchMedia('(prefers-reduced-motion:reduce)').matches) {
     _bwPrize = bwWeighted(cfg.prizes);
     bwSavePrize(clientId, _bwPrize);
-    localStorage.setItem(`wheelSpun_${clientId}`, new Date().toISOString());
+    safeLS.setItem(`wheelSpun_${clientId}`, new Date().toISOString());
     document.getElementById('bonus-wheel-screen').classList.remove('hidden');
     bwShowResult(_bwPrize);
     return true;
@@ -4018,7 +4122,7 @@ function bwSpin() {
           if(ptr){ptr.classList.add('ping');setTimeout(()=>ptr.classList.remove('ping'),400);}
           bwWin();
           bwSavePrize(_bwClientId,_bwPrize);
-          localStorage.setItem(`wheelSpun_${_bwClientId}`, new Date().toISOString());
+          safeLS.setItem(`wheelSpun_${_bwClientId}`, new Date().toISOString());
           setTimeout(()=>bwShowResult(_bwPrize),600);
         }
       }
@@ -4047,7 +4151,7 @@ function bwShowResult(prize) {
 
 function bwSavePrize(clientId, prize) {
   const record = {clientId, prize, spunAt: new Date().toISOString(), sessionId: generateId()};
-  try { localStorage.setItem(`wheelResult_${clientId}`, JSON.stringify(record)); } catch(e) {}
+  try { safeLS.setItem(`wheelResult_${clientId}`, JSON.stringify(record)); } catch(e) {}
   const sbClient = (typeof window !== "undefined" && window._supabaseAnon) || (typeof supabaseClient !== "undefined" ? supabaseClient : null);
   if (sbClient) {
     sbClient.from("fs_clients").update({
@@ -4068,7 +4172,7 @@ function bwProceed() {
 }
 
 function bwSkip() {
-  localStorage.setItem(`wheelSpun_${_bwClientId}`, new Date().toISOString());
+  safeLS.setItem(`wheelSpun_${_bwClientId}`, new Date().toISOString());
   document.getElementById('bonus-wheel-screen').classList.add('hidden');
   if(_bwLedIv){clearInterval(_bwLedIv);_bwLedIv=null;}
 }
